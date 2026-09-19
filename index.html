@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   PaddleOCR-Test · Verteilerbeschreibung
-  v0.7 · 19.09.2026
+  v0.8 · 19.09.2026
 
   Etappe 2. Die Sonde v0.1 hat gezeigt, dass PaddleOCR im Browser läuft:
   auf dem iPhone mit WebGPU 1,5 s für das ganze Blatt, alle elf Stromkreis-
@@ -21,6 +21,11 @@
    4. Aufstiegsregel für die Nummern, Wortlisten für Bezeichnung und Ort.
       Fängt Fehllesungen wie "Obcrspanungschutz" ab.
    5. Modellwahl zum Vergleichen: tiny, small, lateinisch.
+
+  v0.8: Messwerte der Spalten im Rohtext-Reiter. Nach drei Fassungen, in denen ich
+  die Zuordnung gegen ein nachgebautes Blatt gerechnet habe, gibt die Seite jetzt
+  die tatsaechlichen Hoehen der Zeilenmitten je Spalte aus. Damit laesst sich die
+  Regel an Jeans Schild statt an meiner Vorstellung davon pruefen.
 
   v0.7: Die Versatzsuche aus v0.6 ging zu weit. Bei gleichmaessigen Zeilen ist ein
   Versatz von genau einer ganzen Zeile fast gratis - er schiebt die Luecken nur an
@@ -172,7 +177,7 @@
 
   <header>
     <h1>PaddleOCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.7 · 19.09.2026</span>
+    <span class="ver">v0.8 · 19.09.2026</span>
   </header>
 
   <div class="karte">
@@ -280,7 +285,7 @@ const MODELLE = {
   latin: {name:'v5 lateinisch',  konstante:'V5_LATIN_MOBILE_MODEL'}
 };
 
-const VERSION = 'v0.7 · 19.09.2026';
+const VERSION = 'v0.8 · 19.09.2026';
 
 /* ==================== Schrittliste ==================== */
 
@@ -929,12 +934,29 @@ function verarbeite(erg, arbeit, winkel, leseDauer){
   const ziel = document.getElementById('tabelle');
   ziel.innerHTML = '';
   let tabellenText = '';
+  let messText = '';
   if(gruppen){
     const teile = [
       {name:'Nummer',      zeilen: zeilenBilden(gruppen[0])},
       {name:'Bezeichnung', zeilen: zeilenBilden(gruppen[1])},
       {name:'Ort',         zeilen: zeilenBilden(gruppen[2])}
     ];
+
+    /* Messwerte: die tatsächlichen Höhen der Zeilenmitten je Spalte. Ohne die
+       rechne ich gegen ein erfundenes Blatt statt gegen deins. */
+    const mess = ['Zeilenhöhe: ' + Math.round(teile[0].zeilen.hoehe || 0)];
+    teile.forEach(t => {
+      const eintraege = t.zeilen.map(z => Math.round(z.mitte) + ' "' + z.text + '"');
+      mess.push(t.name + ' (' + t.zeilen.length + '): ' + eintraege.join('  |  '));
+    });
+    const nrZ = teile[0].zeilen;
+    if(nrZ.length > 1){
+      const abstaende = [];
+      for(let i=1;i<nrZ.length;i++) abstaende.push(Math.round(nrZ[i].mitte - nrZ[i-1].mitte));
+      mess.push('Abstände in der Nummernspalte: ' + abstaende.join(', '));
+    }
+    messText = mess.join('\n');
+
     const gebaut = baueTabelle(teile, nach);
     ziel.appendChild(gebaut.knoten);
     tabellenText = gebaut.text;
@@ -996,7 +1018,8 @@ function verarbeite(erg, arbeit, winkel, leseDauer){
              (nach ? ', nachbearbeitet' : '') + '\n' +
              'Fassung: ' + VERSION;
 
-  [['Rohtext der Engine', roh], ['Tabelle', tabellenText.trim()], ['Kennzahlen', kz]].forEach(([titel, inhalt]) => {
+  [['Rohtext der Engine', roh], ['Tabelle', tabellenText.trim()],
+   ['Messwerte der Spalten', messText], ['Kennzahlen', kz]].forEach(([titel, inhalt]) => {
     const h = document.createElement('h3');
     h.className = 'klein'; h.textContent = titel;
     const pre = document.createElement('pre');
@@ -1005,7 +1028,8 @@ function verarbeite(erg, arbeit, winkel, leseDauer){
   });
 
   letzteAusgabe = umgebungText + '\n\n--- Rohtext ---\n' + roh +
-                  '\n\n--- Tabelle ---\n' + tabellenText.trim() + '\n\n' + kz;
+                  '\n\n--- Tabelle ---\n' + tabellenText.trim() +
+                  '\n\n--- Messwerte ---\n' + messText + '\n\n' + kz;
 
   document.getElementById('ergebnis').style.display = 'block';
 }
