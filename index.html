@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   OCR-Test · Verteilerbeschreibung
-  v0.3 · 19.09.2026
+  v0.4 · 19.09.2026
 
   Eigenständige Testseite, KEINE Änderung am BDS E-Assistent.
 
@@ -22,6 +22,19 @@
    9. "Stromkreis 5/6" – die Zahlen werden nicht mehr aus dem Wort selbst mitgelesen
   10. Ähnlichkeitsschwelle gelockert ("Echt" findet "Licht"), dafür Abbruch bei Gleichstand
   11. Zeilenzahl je Spalte wird angezeigt, ebenso eine leer gebliebene Spalte
+
+  v0.4 (die Trenner von Hand waren zu empfindlich – abgeschnittene Buchstaben,
+        mitgelesene Tabellenstriche, verlorene Zeilen):
+  12. Die Spalten werden selbst gefunden. Ein erster Durchgang über den ganzen Streifen
+      liefert zu jedem Wort sein Rechteck; aus den Lücken ZWISCHEN den Wörtern werden
+      die beiden Spaltengrenzen bestimmt. Zugeordnet wird danach über die Wortmitte,
+      nicht über einen Schnitt durchs Bild – deshalb schneidet nichts mehr Buchstaben ab
+      und der Verlauf der Spalten spielt keine Rolle mehr.
+  13. Zweiter, kurzer Durchgang nur über den gefundenen Nummernbereich, mit
+      Zifferneinschränkung und Rand, damit kein Zeichen an der Kante verlorengeht.
+  14. Ein Strich oder Schrägstrich ohne Ziffer daneben wird verworfen (der mitgelesene
+      Tabellenstrich machte aus "42" ein unlesbares "42/").
+  15. Die Trenner von Hand bleiben als Rückfallebene, werden aber nicht mehr gebraucht.
 
   Ablage: als zweite Datei neben index.html ins GitHub-Repository,
   erreichbar unter <benutzername>.github.io/<projekt>/ocr-test.html
@@ -131,7 +144,7 @@
 
   <header>
     <h1>OCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.3 · 19.09.2026</span>
+    <span class="ver">v0.4 · 19.09.2026</span>
   </header>
 
   <div class="karte">
@@ -151,7 +164,7 @@
       <div class="griff" id="griff0"></div>
       <div class="griff" id="griff1"></div>
     </div>
-    <p class="hinweis">Zuerst mit dem Finger ein Rechteck über die Beschriftung ziehen. Danach die beiden blauen Trenner zwischen die Spalten schieben: links die Nummern, in der Mitte die Bezeichnungen, rechts die Orte.</p>
+    <p class="hinweis">Mit dem Finger ein Rechteck über die Beschriftung ziehen. Die Spalten sucht die Seite selbst; die blauen Trenner braucht es nur, wenn das misslingt und du „Spalten automatisch finden" abschaltest.</p>
     <div class="knopfreihe" style="margin-top:12px">
       <button class="still" id="ganz">Ganzes Bild</button>
       <button class="still" id="drehen">Drehen</button>
@@ -180,7 +193,8 @@
       </div>
       <div class="schalter"><input type="checkbox" id="optEntzerren" checked><label for="optEntzerren">Schräglage ausgleichen</label></div>
       <div class="schalter"><input type="checkbox" id="optLinien" checked><label for="optLinien">Tabellenlinien tilgen</label></div>
-      <div class="schalter"><input type="checkbox" id="optSpalten" checked><label for="optSpalten">Spalten einzeln lesen</label></div>
+      <div class="schalter"><input type="checkbox" id="optSpalten" checked><label for="optSpalten">Spalten trennen</label></div>
+      <div class="schalter"><input type="checkbox" id="optAuto" checked><label for="optAuto">Spalten automatisch finden</label></div>
       <div class="schalter"><input type="checkbox" id="optNach" checked><label for="optNach">Nummern und Wörter nachbearbeiten</label></div>
     </div>
     <div class="knopfreihe" style="margin-top:14px">
@@ -246,6 +260,7 @@
   var trenner = [0.16, 0.56];
   var worker = null, workerBereit = false, laeuft = false;
   var letzteRohtexte = '';
+  var gefundeneTrenner = null, autoFehl = false;
 
   function $(id){ return document.getElementById(id); }
 
@@ -687,14 +702,89 @@
     });
   }
 
-  function teilCanvas(quell, x0, x1){
-    var b = Math.max(4, Math.round(x1-x0));
+  function bandCanvas(quell, x0, x1){
+    x0 = Math.max(0, Math.round(x0));
+    x1 = Math.min(quell.width, Math.round(x1));
+    var b = Math.max(4, x1 - x0);
     var c = document.createElement('canvas');
     c.width = b + 20; c.height = quell.height + 20;
     var x = c.getContext('2d');
     x.fillStyle = '#FFFFFF'; x.fillRect(0,0,c.width,c.height);
-    x.drawImage(quell, Math.round(x0), 0, b, quell.height, 10, 10, b, quell.height);
-    return c;
+    x.drawImage(quell, x0, 0, b, quell.height, 10, 10, b, quell.height);
+    return {c:c, vx:x0-10, vy:-10};
+  }
+
+  function mittelwert(a){
+    var s=0,i;
+    for(i=0;i<a.length;i++) s+=a[i];
+    return a.length ? s/a.length : 0;
+  }
+
+  function streuung(a){
+    var m = mittelwert(a), s = 0, i, d;
+    for(i=0;i<a.length;i++){ d = a[i]-m; s += d*d; }
+    return s;
+  }
+
+  function median(a){
+    if(!a.length) return 0;
+    var b = a.slice().sort(function(x,y){ return x-y; });
+    return b[Math.floor(b.length/2)];
+  }
+
+  /* Sucht die beiden Spaltengrenzen aus den Lücken ZWISCHEN den Wörtern.
+     Lücken innerhalb einer Bezeichnung sind schmal, Lücken zwischen zwei
+     Spalten breit – deren Mitten fallen in zwei Häufungen. */
+  function spaltenFinden(woerter, breite){
+    var zeilen = zeilenBilden(woerter);
+    var hoehe = zeilen.hoehe || 30;
+    var minLuecke = hoehe * 1.1;
+    var mitten = [];
+    zeilen.forEach(function(z){
+      for(var i=1;i<z.woerter.length;i++){
+        var a = z.woerter[i-1].bbox.x1, b = z.woerter[i].bbox.x0;
+        if(b - a >= minLuecke) mitten.push((a+b)/2);
+      }
+    });
+    if(mitten.length < 3) return null;
+    mitten.sort(function(a,b){ return a-b; });
+
+    var bestI = -1, bestWert = Infinity, i, wert;
+    for(i=1;i<mitten.length;i++){
+      wert = streuung(mitten.slice(0,i)) + streuung(mitten.slice(i));
+      if(wert < bestWert){ bestWert = wert; bestI = i; }
+    }
+    if(bestI < 1) return null;
+
+    var g0 = median(mitten.slice(0, bestI));
+    var g1 = median(mitten.slice(bestI));
+    if(g1 - g0 < breite*0.08) return null;
+    return {g0:g0, g1:g1, hoehe:hoehe};
+  }
+
+  function zuordnen(woerter, g0, g1){
+    var gruppen = [[],[],[]];
+    woerter.forEach(function(w){
+      if(!w.bbox) return;
+      var mx = (w.bbox.x0 + w.bbox.x1)/2;
+      gruppen[mx < g0 ? 0 : (mx < g1 ? 1 : 2)].push(w);
+    });
+    return gruppen;
+  }
+
+  function randVon(woerter, rand){
+    var x0 = Infinity, x1 = -Infinity;
+    woerter.forEach(function(w){
+      if(!w.bbox) return;
+      if(w.bbox.x0 < x0) x0 = w.bbox.x0;
+      if(w.bbox.x1 > x1) x1 = w.bbox.x1;
+    });
+    if(x0 === Infinity) return null;
+    return {x0:x0-rand, x1:x1+rand};
+  }
+
+  function alsText(woerter){
+    return zeilenBilden(woerter).map(function(z){ return z.text; }).join('\n');
   }
 
   $('start').addEventListener('click', function(){
@@ -742,33 +832,81 @@
     }, 30);
   });
 
+  function autoWeg(w){
+    schritt = 'Durchgang 1';
+    return lese(w, arbeit, '6', '').then(function(e){
+      var alle = sammleWoerter(e.data);
+      var gr = spaltenFinden(alle, arbeit.width);
+      if(!gr){
+        autoFehl = true;
+        return handWeg(w);
+      }
+      gefundeneTrenner = [gr.g0, gr.g1];
+      var gruppen = zuordnen(alle, gr.g0, gr.g1);
+      var teile = [
+        {name:'Nummer',      woerter:gruppen[0], vx:0, vy:0},
+        {name:'Bezeichnung', woerter:gruppen[1], vx:0, vy:0},
+        {name:'Ort',         woerter:gruppen[2], vx:0, vy:0}
+      ];
+      teile.forEach(function(t){ t.rohtext = alsText(t.woerter); });
+
+      /* Zweiter Durchgang nur über die Nummern. Der Ausschnitt richtet sich
+         nach den Wörtern selbst, nicht nach der Spaltengrenze – so bleibt der
+         Tabellenstrich draußen und kein Zeichen wird an der Kante beschnitten. */
+      var r = randVon(gruppen[0], gr.hoehe*0.45);
+      if(!r) return teile;
+      var band = bandCanvas(arbeit, r.x0, r.x1);
+      schritt = 'Durchgang 2, Nummern';
+      return lese(w, band.c, '6', '0123456789-/').then(function(e2){
+        var nw = sammleWoerter(e2.data);
+        if(nw.length){
+          teile[0].woerter = nw;
+          teile[0].vx = band.vx; teile[0].vy = band.vy;
+          teile[0].rohtext = e2.data.text;
+        }
+        return teile;
+      });
+    });
+  }
+
+  function handWeg(w){
+    var g0 = Math.round(arbeit.width*trenner[0]);
+    var g1 = Math.round(arbeit.width*trenner[1]);
+    if(!gefundeneTrenner) gefundeneTrenner = [g0, g1];
+    var vor = [
+      {name:'Nummer',      b:bandCanvas(arbeit, 0,  g0),           weiss:'0123456789-/'},
+      {name:'Bezeichnung', b:bandCanvas(arbeit, g0, g1),           weiss:''},
+      {name:'Ort',         b:bandCanvas(arbeit, g1, arbeit.width), weiss:''}
+    ];
+    var raus = [];
+    return vor.reduce(function(kette, teil){
+      return kette.then(function(){
+        schritt = teil.name;
+        return lese(w, teil.b.c, '6', teil.weiss).then(function(e){
+          raus.push({name:teil.name, woerter:sammleWoerter(e.data),
+                     rohtext:e.data.text, vx:teil.b.vx, vy:teil.b.vy});
+        });
+      });
+    }, Promise.resolve()).then(function(){ return raus; });
+  }
+
   function erkennen(winkel){
     var t0 = 0;
     var einzeln = $('optSpalten').checked;
+    var auto = $('optAuto').checked;
+    gefundeneTrenner = null;
+    autoFehl = false;
+
     holeWorker().then(function(w){
       t0 = (window.performance ? performance.now() : Date.now());
       if(!einzeln){
         schritt = '';
         return lese(w, arbeit, '6', '').then(function(e){
-          return [{name:'Alles', data:e.data, x0:0}];
+          return [{name:'Alles', woerter:sammleWoerter(e.data),
+                   rohtext:e.data.text, vx:0, vy:0}];
         });
       }
-      var g0 = Math.round(arbeit.width*trenner[0]);
-      var g1 = Math.round(arbeit.width*trenner[1]);
-      var teile = [
-        {name:'Nummer',      c:teilCanvas(arbeit, 0,  g0),               x0:0,  psm:'6', weiss:'0123456789-/'},
-        {name:'Bezeichnung', c:teilCanvas(arbeit, g0, g1),               x0:g0, psm:'6', weiss:''},
-        {name:'Ort',         c:teilCanvas(arbeit, g1, arbeit.width),     x0:g1, psm:'6', weiss:''}
-      ];
-      var raus = [];
-      return teile.reduce(function(kette, teil){
-        return kette.then(function(){
-          schritt = teil.name;
-          return lese(w, teil.c, teil.psm, teil.weiss).then(function(e){
-            raus.push({name:teil.name, data:e.data, x0:teil.x0});
-          });
-        });
-      }, Promise.resolve()).then(function(){ return raus; });
+      return auto ? autoWeg(w) : handWeg(w);
     }).then(function(teile){
       var dauer = ((window.performance ? performance.now() : Date.now()) - t0)/1000;
       zeigeErgebnis(teile, dauer, winkel, einzeln);
@@ -863,7 +1001,20 @@
       else if(c === '-' || c === '–' || c === '—') raus += '-';
       else if(ZU_ZIFFER[c]) raus += ZU_ZIFFER[c];
     }
-    return raus;
+    /* Ein Trennzeichen ohne Ziffer davor UND dahinter stammt vom Tabellenstrich
+       und nicht aus der Beschriftung – aus "42/" wurde sonst nichts Lesbares.
+       Bewusst als Schleife statt mit Lookbehind, das kennen ältere Safari nicht. */
+    var sauber = '', v, n;
+    for(i=0;i<raus.length;i++){
+      c = raus.charAt(i);
+      if(c === '-' || c === '/'){
+        v = i>0 ? raus.charAt(i-1) : '';
+        n = i<raus.length-1 ? raus.charAt(i+1) : '';
+        if(!/[0-9]/.test(v) || !/[0-9]/.test(n)) continue;
+      }
+      sauber += c;
+    }
+    return sauber;
   }
 
   function zerlege(t){
@@ -1018,7 +1169,7 @@
   function zeigeErgebnis(teile, dauer, winkel, einzeln){
     var alle = [];
     teile.forEach(function(t){
-      t.woerter = sammleWoerter(t.data);
+      if(!t.woerter) t.woerter = sammleWoerter(t.data);
       t.zeilen = zeilenBilden(t.woerter);
       alle = alle.concat(t.woerter);
     });
@@ -1032,6 +1183,12 @@
 
     var ziel = $('tabelle');
     ziel.innerHTML = '';
+    if(autoFehl){
+      var hw = document.createElement('p');
+      hw.className = 'zaehlung krumm';
+      hw.textContent = 'Die Spalten ließen sich nicht selbst finden – es gelten die Trenner von Hand.';
+      ziel.appendChild(hw);
+    }
     if(!einzeln || teile.length < 3){
       teile[0].zeilen.forEach(function(z){
         var d = document.createElement('div');
@@ -1050,8 +1207,7 @@
     x.drawImage(arbeit, 0, 0);
     x.lineWidth = Math.max(1, Math.round(arbeit.width/700));
     teile.forEach(function(t){
-      var vx = einzeln ? (t.x0 - 10) : 0;
-      var vy = einzeln ? -10 : 0;
+      var vx = t.vx || 0, vy = t.vy || 0;
       t.woerter.forEach(function(w){
         if(!w.bbox) return;
         var c = w.confidence||0;
@@ -1059,11 +1215,10 @@
         x.strokeRect(w.bbox.x0+vx, w.bbox.y0+vy, w.bbox.x1-w.bbox.x0, w.bbox.y1-w.bbox.y0);
       });
     });
-    if(einzeln){
+    if(einzeln && gefundeneTrenner){
       x.strokeStyle = '#1E6FD9';
       x.lineWidth = Math.max(2, Math.round(arbeit.width/500));
-      trenner.forEach(function(a){
-        var px = Math.round(arbeit.width*a);
+      gefundeneTrenner.forEach(function(px){
         x.beginPath(); x.moveTo(px, 0); x.lineTo(px, arbeit.height); x.stroke();
       });
     }
@@ -1076,9 +1231,10 @@
       h.className = 'klein'; h.textContent = t.name;
       var pre = document.createElement('pre');
       pre.className = 'roh';
-      pre.textContent = (t.data.text||'').trim() || '(leer)';
+      var txt = (t.rohtext || (t.data && t.data.text) || '').trim();
+      pre.textContent = txt || '(leer)';
       rt.appendChild(h); rt.appendChild(pre);
-      letzteRohtexte += t.name + ':\n' + (t.data.text||'').trim() + '\n\n';
+      letzteRohtexte += t.name + ':\n' + txt + '\n\n';
     });
 
     $('ergebnis').style.display = 'block';
