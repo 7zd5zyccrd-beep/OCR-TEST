@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   OCR-Test · Verteilerbeschreibung
-  v0.5 · 19.09.2026
+  v0.6 · 19.09.2026
 
   Eigenständige Testseite, KEINE Änderung am BDS E-Assistent.
 
@@ -35,6 +35,17 @@
   14. Ein Strich oder Schrägstrich ohne Ziffer daneben wird verworfen (der mitgelesene
       Tabellenstrich machte aus "42" ein unlesbares "42/").
   15. Die Trenner von Hand bleiben als Rückfallebene, werden aber nicht mehr gebraucht.
+
+  v0.6 (aus dem Analysebild: die Linientilgung hatte nie gegriffen):
+  18. Die Linien sind blassgrau, die Schrift fett schwarz. Die Otsu-Schwelle trennt
+      Schrift von Papier und zählt die Linien zum Papier – die Suche lief bisher über
+      ein leeres Feld. Jetzt eine zweite, hellere Schwelle; geschützt wird alles, was
+      zur Schrift gehört, damit Kreuzungen den Buchstaben nicht anfressen.
+  19. Der erste Durchgang dient nur noch dem Finden der Spalten. Gelesen wird danach
+      jede Spalte für sich, mit einem Ausschnitt aus ihren eigenen Wörtern plus Rand.
+      Damit die saubere Erkennung aus v0.3 und die feste Zuordnung aus v0.4 zusammen.
+  20. Für das Nummernband zählen nur Wörter mit Ziffer, sonst zog der als "/" gelesene
+      Tabellenstrich den Ausschnitt bis an die Linie heran.
 
   v0.5:
   16. Das Analysebild lässt sich kopieren und teilen.
@@ -149,7 +160,7 @@
 
   <header>
     <h1>OCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.5 · 19.09.2026</span>
+    <span class="ver">v0.6 · 19.09.2026</span>
   </header>
 
   <div class="karte">
@@ -270,7 +281,7 @@
   var worker = null, workerBereit = false, laeuft = false;
   var letzteRohtexte = '', letzteKennzahlen = '';
   var gefundeneTrenner = null, autoFehl = false;
-  var VERSION = 'v0.5 · 19.09.2026';
+  var VERSION = 'v0.6 · 19.09.2026';
 
   function $(id){ return document.getElementById(id); }
 
@@ -598,9 +609,26 @@
     var ctx = canvas.getContext('2d');
     var W = canvas.width, H = canvas.height;
     var t = graustufen(canvas);
-    var s = otsu(t.hist, t.n);
-    var bin = new Uint8Array(t.n), i;
-    for(i=0;i<t.n;i++) bin[i] = t.grau[i] < s ? 1 : 0;
+    var sText = otsu(t.hist, t.n);
+    var i;
+
+    /* Kern der Sache: die Tabellenlinien sind blassgrau, die Schrift ist fett
+       schwarz. Eine Schwelle, die Schrift von Papier trennt, zählt die Linien
+       zum Papier – in v0.3/v0.5 lief die Suche deshalb über ein leeres Feld.
+       Darum eine zweite, hellere Schwelle: alles, was merklich dunkler ist als
+       das Papier. Geschützt wird über binT: was zur Schrift gehört, bleibt
+       stehen, auch dort wo eine Linie mitten durch einen Buchstaben läuft. */
+    var summeHell = 0, zaehlHell = 0;
+    for(i=0;i<t.n;i++) if(t.grau[i] >= sText){ summeHell += t.grau[i]; zaehlHell++; }
+    var papier = zaehlHell ? (summeHell/zaehlHell) : 255;
+    var sLinie = Math.round(sText + (papier - sText) * 0.75);
+    if(sLinie <= sText + 1) sLinie = sText + 2;
+
+    var bin = new Uint8Array(t.n), binT = new Uint8Array(t.n);
+    for(i=0;i<t.n;i++){
+      bin[i]  = t.grau[i] < sLinie ? 1 : 0;
+      binT[i] = t.grau[i] <= sText ? 1 : 0;
+    }
 
     var lueckeW = Math.max(2, Math.round(W/300));
     var lueckeH = Math.max(2, Math.round(H/300));
@@ -631,6 +659,7 @@
               for(xx=x0; xx<x; xx++){
                 yv = y + Math.round(xx*m);
                 if(yv<0 || yv>=H || !bin[yv*W+xx]) continue;
+                if(binT[yv*W+xx]) continue;            /* gehört zur Schrift */
                 o=yv; while(o>0 && bin[(o-1)*W+xx]) o--;
                 u=yv; while(u<H-1 && bin[(u+1)*W+xx]) u++;
                 if(u-o+1 <= maxDick) weg[yv*W+xx] = 1;
@@ -661,6 +690,7 @@
               for(yy=y0; yy<y; yy++){
                 xv = x + Math.round(yy*m);
                 if(xv<0 || xv>=W || !bin[yy*W+xv]) continue;
+                if(binT[yy*W+xv]) continue;            /* gehört zur Schrift */
                 l=xv; while(l>0 && bin[yy*W+(l-1)]) l--;
                 r=xv; while(r<W-1 && bin[yy*W+(r+1)]) r++;
                 if(r-l+1 <= maxDick) weg[yy*W+xv] = 1;
@@ -782,10 +812,13 @@
     return gruppen;
   }
 
-  function randVon(woerter, rand){
+  function randVon(woerter, rand, nurMitZiffer){
     var x0 = Infinity, x1 = -Infinity;
     woerter.forEach(function(w){
       if(!w.bbox) return;
+      /* Für das Nummernband nur Wörter mit Ziffer: der als "/" gelesene
+         Tabellenstrich zog den Ausschnitt sonst bis an die Linie heran. */
+      if(nurMitZiffer && !/[0-9]/.test(w.text||'')) return;
       if(w.bbox.x0 < x0) x0 = w.bbox.x0;
       if(w.bbox.x1 > x1) x1 = w.bbox.x1;
     });
@@ -843,7 +876,7 @@
   });
 
   function autoWeg(w){
-    schritt = 'Durchgang 1';
+    schritt = 'Spalten suchen';
     return lese(w, arbeit, '6', '').then(function(e){
       var alle = sammleWoerter(e.data);
       var gr = spaltenFinden(alle, arbeit.width);
@@ -853,29 +886,42 @@
       }
       gefundeneTrenner = [gr.g0, gr.g1];
       var gruppen = zuordnen(alle, gr.g0, gr.g1);
-      var teile = [
-        {name:'Nummer',      woerter:gruppen[0], vx:0, vy:0},
-        {name:'Bezeichnung', woerter:gruppen[1], vx:0, vy:0},
-        {name:'Ort',         woerter:gruppen[2], vx:0, vy:0}
-      ];
-      teile.forEach(function(t){ t.rohtext = alsText(t.woerter); });
+      var rand = gr.hoehe * 0.45;
+      var grenzen = [0, gr.g0, gr.g1, arbeit.width];
 
-      /* Zweiter Durchgang nur über die Nummern. Der Ausschnitt richtet sich
-         nach den Wörtern selbst, nicht nach der Spaltengrenze – so bleibt der
-         Tabellenstrich draußen und kein Zeichen wird an der Kante beschnitten. */
-      var r = randVon(gruppen[0], gr.hoehe*0.45);
-      if(!r) return teile;
-      var band = bandCanvas(arbeit, r.x0, r.x1);
-      schritt = 'Durchgang 2, Nummern';
-      return lese(w, band.c, '6', '0123456789-/').then(function(e2){
-        var nw = sammleWoerter(e2.data);
-        if(nw.length){
-          teile[0].woerter = nw;
-          teile[0].vx = band.vx; teile[0].vy = band.vy;
-          teile[0].rohtext = e2.data.text;
-        }
-        return teile;
-      });
+      /* Der erste Durchgang dient nur dem Finden der Spalten. Gelesen wird
+         danach jede Spalte für sich – über einem schmalen, gleichförmigen
+         Streifen liest die Engine deutlich sauberer als über dem ganzen Blatt.
+         Der Ausschnitt kommt aus den Wörtern selbst, nicht aus der Grenze,
+         deshalb wird kein Buchstabe mehr angeschnitten. */
+      var namen = ['Nummer','Bezeichnung','Ort'];
+      var weiss = ['0123456789-/','',''];
+      var teile = [];
+
+      return [0,1,2].reduce(function(kette, i){
+        return kette.then(function(){
+          var r = randVon(gruppen[i], rand, i === 0);
+          if(!r){
+            teile[i] = {name:namen[i], woerter:[], rohtext:'', vx:0, vy:0};
+            return;
+          }
+          /* nicht unbegrenzt über die eigene Spalte hinauslaufen lassen */
+          var links  = Math.max(grenzen[i]   - rand*6, Math.min(r.x0, grenzen[i+1]));
+          var rechts = Math.min(grenzen[i+1] + rand*6, Math.max(r.x1, grenzen[i]));
+          var band = bandCanvas(arbeit, links, rechts);
+          schritt = namen[i];
+          return lese(w, band.c, '6', weiss[i]).then(function(e2){
+            var nw = sammleWoerter(e2.data);
+            if(nw.length){
+              teile[i] = {name:namen[i], woerter:nw, rohtext:e2.data.text,
+                          vx:band.vx, vy:band.vy};
+            } else {
+              teile[i] = {name:namen[i], woerter:gruppen[i],
+                          rohtext:alsText(gruppen[i]), vx:0, vy:0};
+            }
+          });
+        });
+      }, Promise.resolve()).then(function(){ return teile; });
     });
   }
 
