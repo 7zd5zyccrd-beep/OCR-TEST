@@ -1,16 +1,27 @@
 <!DOCTYPE html>
 <!--
   OCR-Test · Verteilerbeschreibung
-  v0.2 · 19.09.2026
+  v0.3 · 19.09.2026
 
   Eigenständige Testseite, KEINE Änderung am BDS E-Assistent.
 
-  Neu gegenüber v0.1:
+  v0.2:
    1. Entzerren – Schräglage wird über das Schwärzungsprofil gemessen und ausgeglichen
    2. Linien tilgen – lange dünne Züge werden weiß übermalt, Kreuzungen mit Buchstaben bleiben stehen
    3. Spalten – zwei verschiebbare Trenner, jede Spalte wird für sich gelesen
    4. Nachbearbeitung – Aufstiegsregel für die Nummern, Wortlisten für Bezeichnung und Ort;
       was nicht sicher zugeordnet werden kann, bleibt ausdrücklich leer
+
+  v0.3 (aus dem zweiten Feldversuch):
+   5. Linientilgung läuft über mehrere Winkel, weil die Linien schräg und leicht gewellt laufen
+      und zeilenweise deshalb in zu kurze Stücke zerfielen
+   6. Aufstiegsregel erkennt fehlende Zeilen: passt eine Nummer nicht auf die erwartete, wohl
+      aber auf eine der nächsten, wird die Lücke angezeigt statt stillschweigend verschoben
+   7. Verwechslung 9/3 ergänzt (gelesen wurde 3 statt 9)
+   8. Senkrechter Strich gilt als Trennzeichen: "Wohnzimmer | Schlafzimmer" wird erkannt
+   9. "Stromkreis 5/6" – die Zahlen werden nicht mehr aus dem Wort selbst mitgelesen
+  10. Ähnlichkeitsschwelle gelockert ("Echt" findet "Licht"), dafür Abbruch bei Gleichstand
+  11. Zeilenzahl je Spalte wird angezeigt, ebenso eine leer gebliebene Spalte
 
   Ablage: als zweite Datei neben index.html ins GitHub-Repository,
   erreichbar unter <benutzername>.github.io/<projekt>/ocr-test.html
@@ -95,6 +106,9 @@
   .geaendert{color:var(--gruen-tief);font-weight:640}
   .unklar{color:var(--rot)}
   .leer{color:var(--rot);font-style:italic}
+  td.luecke-zeile{color:var(--bernstein);font-size:14px;font-weight:600;padding:8px 0}
+  .zaehlung{font-size:13px;color:var(--grau);margin:0 0 10px}
+  .zaehlung.krumm{color:var(--bernstein);font-weight:600}
 
   pre.roh{white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,Menlo,monospace;
     font-size:13px;line-height:1.5;background:#F6F7F3;border:1px solid var(--linie);
@@ -117,7 +131,7 @@
 
   <header>
     <h1>OCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.2 · 19.09.2026</span>
+    <span class="ver">v0.3 · 19.09.2026</span>
   </header>
 
   <div class="karte">
@@ -571,45 +585,64 @@
     var weg = new Uint8Array(t.n);
     var x, y, x0, y0, xx, yy, o, u, l, r;
 
+    /* Waagerecht: die Linien laufen schräg und leicht gewellt, deshalb wird
+       nicht streng zeilenweise gesucht, sondern entlang mehrerer Neigungen. */
     var zeile = new Uint8Array(W);
-    for(y=0;y<H;y++){
-      for(x=0;x<W;x++) zeile[x] = bin[y*W+x];
-      schliessen(zeile, W, lueckeW);
-      x = 0;
-      while(x<W){
-        if(zeile[x]){
-          x0 = x;
-          while(x<W && zeile[x]) x++;
-          if(x-x0 >= minW){
-            for(xx=x0; xx<x; xx++){
-              if(!bin[y*W+xx]) continue;
-              o=y; while(o>0 && bin[(o-1)*W+xx]) o--;
-              u=y; while(u<H-1 && bin[(u+1)*W+xx]) u++;
-              if(u-o+1 <= maxDick) weg[y*W+xx] = 1;
+    var wink = [-3, -1.5, 0, 1.5, 3], wi, m, yv;
+    for(wi=0; wi<wink.length; wi++){
+      m = Math.tan(wink[wi]*Math.PI/180);
+      for(y=0;y<H;y++){
+        for(x=0;x<W;x++){
+          yv = y + Math.round(x*m);
+          zeile[x] = (yv>=0 && yv<H) ? bin[yv*W+x] : 0;
+        }
+        schliessen(zeile, W, lueckeW);
+        x = 0;
+        while(x<W){
+          if(zeile[x]){
+            x0 = x;
+            while(x<W && zeile[x]) x++;
+            if(x-x0 >= minW){
+              for(xx=x0; xx<x; xx++){
+                yv = y + Math.round(xx*m);
+                if(yv<0 || yv>=H || !bin[yv*W+xx]) continue;
+                o=yv; while(o>0 && bin[(o-1)*W+xx]) o--;
+                u=yv; while(u<H-1 && bin[(u+1)*W+xx]) u++;
+                if(u-o+1 <= maxDick) weg[yv*W+xx] = 1;
+              }
             }
-          }
-        } else x++;
+          } else x++;
+        }
       }
     }
 
+    /* Senkrecht: die Spaltenstriche stehen ruhiger, zwei Neigungen genügen. */
     var spalte = new Uint8Array(H);
-    for(x=0;x<W;x++){
-      for(y=0;y<H;y++) spalte[y] = bin[y*W+x];
-      schliessen(spalte, H, lueckeH);
-      y = 0;
-      while(y<H){
-        if(spalte[y]){
-          y0 = y;
-          while(y<H && spalte[y]) y++;
-          if(y-y0 >= minH){
-            for(yy=y0; yy<y; yy++){
-              if(!bin[yy*W+x]) continue;
-              l=x; while(l>0 && bin[yy*W+(l-1)]) l--;
-              r=x; while(r<W-1 && bin[yy*W+(r+1)]) r++;
-              if(r-l+1 <= maxDick) weg[yy*W+x] = 1;
+    var winkS = [-1.5, 0, 1.5], xv;
+    for(wi=0; wi<winkS.length; wi++){
+      m = Math.tan(winkS[wi]*Math.PI/180);
+      for(x=0;x<W;x++){
+        for(y=0;y<H;y++){
+          xv = x + Math.round(y*m);
+          spalte[y] = (xv>=0 && xv<W) ? bin[y*W+xv] : 0;
+        }
+        schliessen(spalte, H, lueckeH);
+        y = 0;
+        while(y<H){
+          if(spalte[y]){
+            y0 = y;
+            while(y<H && spalte[y]) y++;
+            if(y-y0 >= minH){
+              for(yy=y0; yy<y; yy++){
+                xv = x + Math.round(yy*m);
+                if(xv<0 || xv>=W || !bin[yy*W+xv]) continue;
+                l=xv; while(l>0 && bin[yy*W+(l-1)]) l--;
+                r=xv; while(r<W-1 && bin[yy*W+(r+1)]) r++;
+                if(r-l+1 <= maxDick) weg[yy*W+xv] = 1;
+              }
             }
-          }
-        } else y++;
+          } else y++;
+        }
       }
     }
 
@@ -800,19 +833,26 @@
   /* ================= Nachbearbeitung ================= */
 
   function saeubern(t){
-    return (t||'')
-      .replace(/[|_;·"'‚„”“]/g,' ')
+    var s = (t||'')
+      .replace(/[_;·"'‚„”“®]/g,' ')
       .replace(/\s+/g,' ')
-      .replace(/^[\s\-–.,:]+/,'')
-      .replace(/[\s.,:]+$/,'')
       .trim();
+    // Striche am Anfang und Ende sind Tabellenlinien, keine Zeichen
+    s = s.replace(/^[\s|\-–.,:\/]+/,'').replace(/[\s|\-–.,:\/]+$/,'');
+    // ein senkrechter Strich mitten im Text ist ein verlesener Schrägstrich
+    s = s.replace(/\s*\|\s*/g,' / ');
+    return s.replace(/\s+/g,' ').trim();
+  }
+
+  function nurZiffern(t){
+    return (t||'').replace(/[–—]/g,'-').replace(/[^0-9\-\/]/g,'');
   }
 
   var ZU_ZIFFER = {'l':'1','I':'1','i':'1','|':'1','O':'0','o':'0','Q':'0','D':'0',
     'S':'5','s':'5','B':'8','Z':'2','z':'2','G':'6','T':'7','g':'9','A':'4','b':'6'};
 
-  var VERWECHSLUNG = {'4':['1','7'],'1':['4','7'],'7':['1','4'],'0':['8','6','9'],'8':['0','6','9'],
-    '6':['5','8','0'],'5':['6','8','3'],'9':['8','0','4'],'3':['8','5'],'2':['7','3']};
+  var VERWECHSLUNG = {'4':['1','7'],'1':['4','7'],'7':['1','4'],'0':['8','6','9'],'8':['0','6','9','3'],
+    '6':['5','8','0'],'5':['6','8','3','9'],'9':['8','0','4','3'],'3':['8','5','9','2'],'2':['7','3']};
 
   function nurNummer(t){
     var raus = '', i, c;
@@ -852,40 +892,52 @@
     return raus;
   }
 
-  function nummerDeuten(roh, erwartet){
-    var t = nurNummer(roh);
-    var erg = {roh:roh, text:t || '—', geaendert:false, unklar:false, a:null, b:null};
-    var z = zerlege(t);
+  /* Prüft, ob sich der gelesene Text als Nummer lesen lässt, die bei
+     "erwartet" beginnt – notfalls über eine verwechselte Ziffer. */
+  function versuche(t, erwartet){
+    var z = zerlege(t), i, zz, s, links, rechts;
 
-    if(z && z.a === erwartet && z.b >= z.a){
-      erg.a = z.a; erg.b = z.b; erg.text = schreibe(z);
-      return erg;
-    }
+    if(z && z.a === erwartet && z.b >= z.a)
+      return {a:z.a, b:z.b, text:schreibe(z), geaendert:false};
 
+    // Trennzeichen verlesen: "718" statt "7/8"
     if(/^\d{3,4}$/.test(t)){
-      for(var s=1; s<t.length-1; s++){
-        var links = parseInt(t.substring(0,s),10);
-        var rechts = parseInt(t.substring(s+1),10);
-        if(links === erwartet && rechts === erwartet+1){
-          erg.a = links; erg.b = rechts;
-          erg.text = links + '/' + rechts;
-          erg.geaendert = true;
-          return erg;
-        }
+      for(s=1; s<t.length-1; s++){
+        links  = parseInt(t.substring(0,s),10);
+        rechts = parseInt(t.substring(s+1),10);
+        if(links === erwartet && rechts === erwartet+1)
+          return {a:links, b:rechts, text:links+'/'+rechts, geaendert:true};
       }
     }
 
-    var kandidaten = varianten(t), i, zz;
+    var kandidaten = varianten(t);
     for(i=0;i<kandidaten.length;i++){
       zz = zerlege(kandidaten[i]);
-      if(zz && zz.a === erwartet && zz.b >= zz.a && (zz.b - zz.a) < 12){
-        erg.a = zz.a; erg.b = zz.b;
-        erg.text = schreibe(zz);
-        erg.geaendert = (kandidaten[i] !== t);
+      if(zz && zz.a === erwartet && zz.b >= zz.a && (zz.b - zz.a) < 12)
+        return {a:zz.a, b:zz.b, text:schreibe(zz), geaendert:(kandidaten[i] !== t)};
+    }
+    return null;
+  }
+
+  function nummerDeuten(roh, erwartet){
+    var t = nurNummer(roh);
+    var erg = {roh:roh, text:t || '—', geaendert:false, unklar:false, luecke:0, a:null, b:null};
+    var v, e;
+
+    /* Erst die erwartete Nummer versuchen, danach die nächsten vier.
+       Trifft eine spätere, fehlt dazwischen eine Zeile – das wird gemeldet,
+       statt die Zuordnung stillschweigend zu verschieben. */
+    for(e = erwartet; e <= erwartet + 4; e++){
+      v = versuche(t, e);
+      if(v){
+        erg.a = v.a; erg.b = v.b; erg.text = v.text;
+        erg.geaendert = v.geaendert;
+        erg.luecke = e - erwartet;
         return erg;
       }
     }
 
+    var z = zerlege(t);
     if(z){ erg.a = z.a; erg.b = Math.max(z.a, z.b); erg.text = schreibe(z); }
     erg.unklar = true;
     return erg;
@@ -912,14 +964,19 @@
   function besteWahl(wort, liste){
     var w = saeubern(wort);
     if(!w) return null;
-    var best = null, bestD = 999;
+    var best = null, bestD = 999, zweitD = 999;
     liste.forEach(function(k){
       var d = abstand(w, k);
-      if(d < bestD){ bestD = d; best = k; }
+      if(d < bestD){ zweitD = bestD; bestD = d; best = k; }
+      else if(d < zweitD) zweitD = d;
     });
     if(!best) return null;
-    var grenze = Math.max(1, Math.floor(Math.max(w.length, best.length)/4));
-    return bestD <= grenze ? {wort:best, d:bestD} : null;
+    // großzügiger als in v0.2: "Echt" soll "Licht" finden
+    var grenze = Math.max(1, Math.round(Math.max(w.length, best.length) * 0.35));
+    if(bestD > grenze) return null;
+    // steht ein zweites Wort genauso nah, ist die Wahl nicht eindeutig
+    if(bestD > 0 && zweitD === bestD) return null;
+    return {wort:best, d:bestD};
   }
 
   function textDeuten(roh, liste){
@@ -927,9 +984,12 @@
     var erg = {roh:roh, text:'', geaendert:false, leer:false};
     if(!t){ erg.leer = true; return erg; }
 
-    var sk = /stromkre/i.exec(t);
+    /* "Stromkreis 9 - 12" durchlassen. Die Zahlen stehen HINTER dem Wort –
+       vorher wurde das Wort selbst mit in die Ziffern gerechnet. */
+    var sk = /stromkre\S*/i.exec(t);
     if(sk){
-      var zahlen = nurNummer(t.substring(sk.index));
+      var zahlen = nurZiffern(t.substring(sk.index + sk[0].length));
+      if(!zahlen) return {roh:roh, text:'Stromkreis', geaendert:true, leer:false};
       erg.text = 'Stromkreis ' + zahlen.replace(/-/g,' - ');
       erg.geaendert = (erg.text !== t);
       return erg;
@@ -1051,9 +1111,22 @@
     var erwartet = 1;
 
     nr.forEach(function(z){
-      var tr = document.createElement('tr');
       var n = nach ? nummerDeuten(z.text, erwartet)
-                   : {text:saeubern(z.text)||'—', roh:z.text, geaendert:false, unklar:false, b:null};
+                   : {text:saeubern(z.text)||'—', roh:z.text, geaendert:false, unklar:false, luecke:0, b:null};
+
+      if(n.luecke > 0){
+        var warn = document.createElement('tr');
+        var wtd = document.createElement('td');
+        wtd.colSpan = 3;
+        wtd.className = 'luecke-zeile';
+        wtd.textContent = n.luecke === 1
+          ? 'Hier fehlt eine Zeile – Nummer ' + erwartet + ' wurde nicht gelesen'
+          : 'Hier fehlen ' + n.luecke + ' Zeilen – ab Nummer ' + erwartet;
+        warn.appendChild(wtd);
+        koerper.appendChild(warn);
+      }
+
+      var tr = document.createElement('tr');
       if(n.b !== null && n.b !== undefined) erwartet = n.b + 1;
       tr.appendChild(zelle(n.text, z.text, n.geaendert, n.unklar, false, 'nr'));
 
@@ -1072,6 +1145,24 @@
 
     tab.appendChild(koerper);
     var huelle = document.createElement('div');
+
+    var zaehl = document.createElement('p');
+    zaehl.className = 'zaehlung';
+    var leerSpalten = [];
+    if(!nr.length)  leerSpalten.push('Nummer');
+    if(!bez.length) leerSpalten.push('Bezeichnung');
+    if(!ort.length) leerSpalten.push('Ort');
+    if(leerSpalten.length){
+      zaehl.className += ' krumm';
+      zaehl.textContent = 'Leer geblieben: ' + leerSpalten.join(', ') + '. Die Trenner sitzen vermutlich falsch.';
+    } else {
+      zaehl.textContent = 'Gefundene Zeilen – Nummer ' + nr.length + ', Bezeichnung ' + bez.length + ', Ort ' + ort.length;
+      if(!(nr.length === bez.length && bez.length === ort.length)){
+        zaehl.className += ' krumm';
+        zaehl.textContent += ' (ungleich, also ist mindestens eine Zeile verloren gegangen)';
+      }
+    }
+    huelle.appendChild(zaehl);
     huelle.appendChild(tab);
 
     var rest = [];
