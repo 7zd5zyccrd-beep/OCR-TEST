@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   PaddleOCR-Test · Verteilerbeschreibung
-  v0.6 · 19.09.2026
+  v0.7 · 19.09.2026
 
   Etappe 2. Die Sonde v0.1 hat gezeigt, dass PaddleOCR im Browser läuft:
   auf dem iPhone mit WebGPU 1,5 s für das ganze Blatt, alle elf Stromkreis-
@@ -21,6 +21,14 @@
    4. Aufstiegsregel für die Nummern, Wortlisten für Bezeichnung und Ort.
       Fängt Fehllesungen wie "Obcrspanungschutz" ab.
    5. Modellwahl zum Vergleichen: tiny, small, lateinisch.
+
+  v0.7: Die Versatzsuche aus v0.6 ging zu weit. Bei gleichmaessigen Zeilen ist ein
+  Versatz von genau einer ganzen Zeile fast gratis - er schiebt die Luecken nur an
+  die Enden -, und die Rechnung waehlte das: die ganze Tabelle sass eine Nummer zu
+  tief, 1-4 ging leer aus. Jetzt zwei Sperren: die Suche endet hart bei einer
+  halben Zeilenhoehe (darueber IST es eine Zeilenverschiebung), und eine Zuordnung,
+  bei der ausgerechnet die erste Nummer leer ausgeht, bekommt einen schweren
+  Aufschlag - der erste Kreis eines Verteilers traegt immer eine Bezeichnung.
 
   v0.6: Die Zuordnung sucht zusaetzlich den Grundversatz zwischen zwei Spalten.
   Auf Jeans Schild laeuft die Ortsspalte nach unten gegen die Nummernspalte; der
@@ -164,7 +172,7 @@
 
   <header>
     <h1>PaddleOCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.6 · 19.09.2026</span>
+    <span class="ver">v0.7 · 19.09.2026</span>
   </header>
 
   <div class="karte">
@@ -272,7 +280,7 @@ const MODELLE = {
   latin: {name:'v5 lateinisch',  konstante:'V5_LATIN_MOBILE_MODEL'}
 };
 
-const VERSION = 'v0.6 · 19.09.2026';
+const VERSION = 'v0.7 · 19.09.2026';
 
 /* ==================== Schrittliste ==================== */
 
@@ -1059,13 +1067,28 @@ function einDurchgang(nrZeilen, spalteZeilen, hoehe, versatz){
 
 /* Der Grundversatz zwischen zwei Spalten ist kein Fehler, sondern die Eigenart
    des Schildes: auf Jeans Blatt läuft die Ortsspalte gegen die Nummernspalte.
-   Bestraft gehört nur, was aus der Reihe fällt. Deshalb wird der Versatz
-   gesucht, bei dem die Zuordnung insgesamt am wenigsten kostet. */
+   Bestraft gehört nur, was aus der Reihe fällt.
+
+   ABER: die Suche ist hart auf eine halbe Zeilenhöhe begrenzt. In v0.6 lief sie
+   bis knapp zwei Zeilen, und bei gleichmäßigen Zeilenabständen ist ein Versatz
+   von genau einer ganzen Zeile fast gratis – er schiebt die Lücken nur an die
+   Enden. Die Rechnung wählte das, und die ganze Tabelle saß eine Nummer zu tief.
+   Ein echter Grundversatz bleibt immer unter einer halben Zeile; alles darüber
+   IST bereits eine Zeilenverschiebung und darf nicht zur Wahl stehen. */
 function zuordnungFinden(nrZeilen, spalteZeilen, hoehe){
   let best = null;
-  for(let v = -1.75; v <= 1.7501; v += 0.25){
+  for(let v = -0.5; v <= 0.5001; v += 0.1){
     const erg = einDurchgang(nrZeilen, spalteZeilen, hoehe, v*hoehe);
-    if(!best || erg.kosten < best.kosten){ best = erg; best.versatz = v; }
+    /* winziger Zuschlag je Versatz, damit bei Gleichstand die Null gewinnt */
+    let bewertet = erg.kosten + Math.abs(v) * hoehe * 0.02;
+    /* Zweite Absicherung, unabhängig von der Geometrie: bleibt ausgerechnet die
+       ERSTE Nummer ohne Eintrag, während die Spalte noch Einträge hat, ist das
+       fast sicher eine Zeilenverschiebung und keine echte Lücke. Der erste Kreis
+       eines Verteilers trägt immer eine Bezeichnung und einen Ort. */
+    if(spalteZeilen.length && erg.zu[0] < 0) bewertet += hoehe * 4;
+    if(!best || bewertet < best.bewertet){
+      best = erg; best.versatz = +v.toFixed(2); best.bewertet = bewertet;
+    }
   }
   return best || {zu:new Array(nrZeilen.length).fill(-1),
                   frei:new Array(spalteZeilen.length).fill(true), kosten:0, versatz:0};
