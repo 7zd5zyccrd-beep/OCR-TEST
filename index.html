@@ -1,33 +1,45 @@
 <!DOCTYPE html>
 <!--
-  PaddleOCR-Sonde
-  v0.1 · 19.09.2026
+  PaddleOCR-Test · Verteilerbeschreibung
+  v0.3 · 19.09.2026
 
-  Etappe 1 von zweien. Diese Seite beantwortet EINE Frage:
-  Lädt PaddleOCR auf dem iPhone und liefert es etwas Brauchbares?
-  Sie ersetzt nicht ocr-test.html – die bleibt unangetastet.
+  Etappe 2. Die Sonde v0.1 hat gezeigt, dass PaddleOCR im Browser läuft:
+  auf dem iPhone mit WebGPU 1,5 s für das ganze Blatt, alle elf Stromkreis-
+  nummern richtig. Diese Fassung setzt die Nachbearbeitung aus ocr-test.html
+  v0.6 obendrauf – das ist der Teil, der die Arbeit von sechs Tesseract-
+  Fassungen enthält und unabhängig vom Erkenner trägt.
 
-  Bewusst NICHT enthalten: Spaltenfindung, Aufstiegsregel, Wortlisten.
-  Die stecken in ocr-test.html v0.6 und kommen in Etappe 2 hier obendrauf,
-  falls die Sonde erfolgreich ist.
+  Was gegenüber v0.1 dazukommt:
+   1. Entzerren vor der Erkennung. Aus den Läufen: die unteren Zeilen laufen
+      bergauf, dort wurde aus "Fehlerstromschutzschalter" ein "Frorestomehatchter".
+      Der Hersteller warnt ausdrücklich vor Schräglage jenseits weniger Grad.
+   2. Kopf und Rauschen verwerfen: alles unterhalb einer Sicherheitsschwelle und
+      alles oberhalb der ersten lesbaren Stromkreisnummer.
+   3. Spalten über die Wortkästen finden, danach je Spalte eigene Zeilen bilden.
+      Löst den Spaltenversatz, an dem Geschirrspüler und Kinderzimmer bisher
+      in derselben Zeile landeten.
+   4. Aufstiegsregel für die Nummern, Wortlisten für Bezeichnung und Ort.
+      Fängt Fehllesungen wie "Obcrspanungschutz" ab.
+   5. Modellwahl zum Vergleichen: tiny, small, lateinisch.
 
-  Ablage: als weitere Datei neben index.html und ocr-test.html ins Repository,
+  v0.3: Knopf "App neu laden" gegen den Zwischenspeicher von GitHub Pages und
+  Safari – hängt eine frische Kennung an die Adresse und meldet einen etwaigen
+  Service Worker ab. Der HTTP-Speicher bleibt unangetastet, damit die Modelle
+  nicht jedes Mal neu geladen werden.
+
+  Grundsatz unverändert: lieber ein leeres Feld zum Ausfüllen als ein plausibel
+  aussehendes falsches.
+
+  Ablage: neben index.html und ocr-test.html ins Repository,
   erreichbar unter <benutzername>.github.io/<projekt>/paddle-test.html
-
-  Technik: ppu-paddle-ocr (MIT) über ONNX Runtime Web. Modelle PP-OCRv6 tiny,
-  rund 6 MB, werden beim ersten Lauf geladen. Im Browser hängen sie danach
-  nur am HTTP-Zwischenspeicher – dauerhaftes Vorhalten in IndexedDB wäre
-  Etappe 2, erst wenn feststeht, dass es überhaupt läuft.
-
-  Weil ich die Einbindung hier nicht ausprobieren kann, versucht die Seite
-  zwei Wege nacheinander und meldet genau, welcher Schritt scheitert.
+  Technik: ppu-paddle-ocr (MIT) über ONNX Runtime Web.
 -->
 <html lang="de">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
-<title>PaddleOCR-Sonde</title>
+<title>PaddleOCR-Test · Verteilerbeschreibung</title>
 
 <script type="importmap">
 {
@@ -41,6 +53,7 @@
   :root{
     --gruen:#A0D241; --gruen-tief:#7CA82C; --dunkel:#1A1F16; --grund:#FBFBF7;
     --karte:#FFFFFF; --linie:#E2E4DC; --grau:#6B7065; --rot:#C0392B; --bernstein:#D98E0B;
+    --blau:#1E6FD9;
     box-sizing:border-box;
     padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
   }
@@ -49,7 +62,7 @@
        color:var(--dunkel);background:var(--grund);-webkit-text-size-adjust:100%}
   .huelle{max-width:900px;margin:0 auto;padding:18px 16px 60px}
   header{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:18px}
-  header h1{font-size:21px;margin:0;font-weight:640}
+  header h1{font-size:21px;margin:0;font-weight:640;letter-spacing:-.01em}
   header .ver{font-size:13px;color:var(--grau)}
 
   .karte{background:var(--karte);border:1px solid var(--linie);border-radius:16px;
@@ -60,10 +73,18 @@
     border:1px solid var(--gruen-tief);background:var(--gruen);color:var(--dunkel);
     font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:8px;cursor:pointer}
   button.still,.knopf.still{background:#fff;border-color:var(--linie);font-weight:500}
-  button:disabled{opacity:.45}
+  button:disabled{opacity:.45;cursor:default}
   .knopfreihe{display:flex;gap:10px;flex-wrap:wrap}
   .breit{width:100%}
   input[type=file]{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+
+  .felder{display:grid;gap:12px}
+  @media (min-width:560px){.felder{grid-template-columns:1fr 1fr}}
+  label.feld{display:block;font-size:13px;color:var(--grau);margin-bottom:5px}
+  select{font:inherit;width:100%;min-height:48px;padding:0 12px;border:1px solid var(--linie);
+    border-radius:14px;background:#fff;color:var(--dunkel)}
+  .schalter{display:flex;align-items:center;gap:10px;min-height:48px;font-size:16px}
+  .schalter input{width:24px;height:24px;accent-color:var(--gruen-tief)}
 
   ol.schritte{list-style:none;padding:0;margin:0}
   ol.schritte li{display:flex;gap:10px;align-items:baseline;padding:7px 0;
@@ -84,23 +105,68 @@
       border-radius:12px;padding:12px;margin:0 0 12px}
   h3.klein{font-size:13px;color:var(--grau);margin:16px 0 6px;font-weight:600}
   .hinweis{font-size:14px;color:var(--grau);margin:10px 0 0}
+
+  .reiter{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+  .reiter button{min-height:42px;padding:0 14px;font-size:15px;background:#fff;
+                 border-color:var(--linie);font-weight:500}
+  .reiter button[aria-selected="true"]{background:var(--gruen);border-color:var(--gruen-tief);font-weight:620}
+  .tafel{display:none}
+  .tafel.an{display:block}
+
+  .zahlen{display:flex;gap:18px;flex-wrap:wrap;font-size:14px;color:var(--grau);margin-bottom:14px}
+  .zahlen b{display:block;font-size:19px;color:var(--dunkel);font-weight:640}
+
+  table.erg{width:100%;border-collapse:collapse;font-size:15px}
+  table.erg th{text-align:left;font-size:12px;color:var(--grau);font-weight:600;padding:0 6px 6px 0}
+  table.erg td{padding:8px 6px 8px 0;border-top:1px solid var(--linie);vertical-align:top}
+  table.erg td.nr{white-space:nowrap;font-weight:640;width:22%}
+  .klein-roh{display:block;font-size:12px;color:var(--grau)}
+  .geaendert{color:var(--gruen-tief);font-weight:640}
+  .unklar{color:var(--rot)}
+  .leer{color:var(--rot);font-style:italic}
+  td.luecke-zeile{color:var(--bernstein);font-size:14px;font-weight:600;padding:8px 0}
+  .zaehlung{font-size:13px;color:var(--grau);margin:0 0 10px}
+  .zaehlung.krumm{color:var(--bernstein);font-weight:600}
+  .legende{font-size:13px;color:var(--grau);margin-top:12px}
 </style>
 </head>
 <body>
 <div class="huelle">
 
   <header>
-    <h1>PaddleOCR-Sonde</h1>
-    <span class="ver">v0.1 · 19.09.2026</span>
+    <h1>PaddleOCR-Test · Verteilerbeschreibung</h1>
+    <span class="ver">v0.3 · 19.09.2026</span>
   </header>
 
   <div class="karte">
-    <h2>Ablauf</h2>
-    <ol class="schritte" id="schritte"></ol>
+    <h2>Engine</h2>
+    <div class="felder">
+      <div>
+        <label class="feld" for="modell">Modell</label>
+        <select id="modell">
+          <option value="tiny" selected>v6 tiny · rund 6 MB · Vorgabe</option>
+          <option value="small">v6 small · voller Zeichenvorrat · rund 30 MB</option>
+          <option value="latin">v5 lateinisch · rund 12 MB</option>
+        </select>
+      </div>
+      <div>
+        <label class="feld" for="schwelle">Sicherheitsschwelle</label>
+        <select id="schwelle">
+          <option value="0">alles behalten</option>
+          <option value="0.5">0,50</option>
+          <option value="0.65" selected>0,65 · verwirft den Firmenkopf</option>
+          <option value="0.8">0,80</option>
+        </select>
+      </div>
+    </div>
+    <ol class="schritte" id="schritte" style="margin-top:12px"></ol>
     <div class="knopfreihe" style="margin-top:14px">
       <button id="start" class="breit">Engine laden und vorbereiten</button>
     </div>
-    <p class="hinweis">Der erste Lauf lädt Bibliothek und Modelle, rund 6 bis 10 MB. Das braucht Netz und etwas Geduld.</p>
+    <div class="knopfreihe" style="margin-top:10px">
+      <button class="still" id="neuladen">App neu laden</button>
+    </div>
+    <p class="hinweis">Beim ersten Mal werden die Modelle geladen, das braucht Netz. Ein Modellwechsel startet den Dienst neu. „App neu laden" holt die Seite frisch vom Server, wenn GitHub Pages noch die alte Fassung ausliefert; die Modelle bleiben dabei im Gerät.</p>
   </div>
 
   <div class="karte" id="fotokarte" style="display:none">
@@ -108,19 +174,42 @@
     <div class="knopfreihe">
       <label class="knopf" for="datei">Foto aufnehmen oder wählen</label>
       <input type="file" id="datei" accept="image/*">
+      <button class="still" id="nochmal" disabled>Nochmal lesen</button>
     </div>
-    <p class="hinweis" id="fotoinfo">Am besten derselbe Ausschnitt wie bei den Tesseract-Läufen, damit wir vergleichen können.</p>
-    <div style="margin-top:12px"><canvas id="leinwand"></canvas></div>
+    <div class="felder" style="margin-top:12px">
+      <div class="schalter"><input type="checkbox" id="optEntzerren" checked><label for="optEntzerren">Schräglage ausgleichen</label></div>
+      <div class="schalter"><input type="checkbox" id="optKopf" checked><label for="optKopf">Kopfzeilen verwerfen</label></div>
+      <div class="schalter"><input type="checkbox" id="optSpalten" checked><label for="optSpalten">Spalten trennen</label></div>
+      <div class="schalter"><input type="checkbox" id="optNach" checked><label for="optNach">Nummern und Wörter nachbearbeiten</label></div>
+    </div>
+    <p class="hinweis" id="fotoinfo">Am besten dasselbe Blatt wie bisher, damit wir vergleichen können.</p>
   </div>
 
   <div class="karte" id="ergebnis" style="display:none">
     <h2>Ergebnis</h2>
-    <div id="zahlen" class="hinweis" style="margin:0 0 12px"></div>
-    <h3 class="klein">Erkannter Text</h3>
-    <pre id="text"></pre>
-    <h3 class="klein">Aufbau der Rückgabe (für den weiteren Einbau)</h3>
-    <pre id="struktur"></pre>
-    <div class="knopfreihe">
+    <div class="zahlen">
+      <div><b id="zDauer">–</b>Sekunden</div>
+      <div><b id="zWoerter">–</b>Wörter</div>
+      <div><b id="zSicher">–</b>mittlere Sicherheit</div>
+      <div><b id="zWinkel">–</b>Schräglage</div>
+    </div>
+    <div class="reiter" role="tablist">
+      <button role="tab" aria-selected="true" data-tafel="tTabelle">Tabelle</button>
+      <button role="tab" aria-selected="false" data-tafel="tBild">Bild</button>
+      <button role="tab" aria-selected="false" data-tafel="tRoh">Rohtext</button>
+    </div>
+    <div class="tafel an" id="tTabelle">
+      <div id="tabelle"></div>
+      <p class="legende">Grün heißt korrigiert, rot heißt unsicher oder bewusst leer gelassen. Darunter klein, was die Engine gelesen hat.</p>
+    </div>
+    <div class="tafel" id="tBild">
+      <canvas id="leinwand"></canvas>
+      <p class="hinweis">Blau die gefundenen Spaltengrenzen, die Kästen nach Spalte eingefärbt. Verworfenes ist grau.</p>
+    </div>
+    <div class="tafel" id="tRoh">
+      <div id="rohtexte"></div>
+    </div>
+    <div class="knopfreihe" style="margin-top:14px">
       <button class="still" id="kopieren">Alles kopieren</button>
       <button class="still" id="bildTeilen">Bild teilen</button>
     </div>
@@ -134,99 +223,115 @@
 </div>
 
 <script type="module">
-/* ============ kleine Helfer für die Schrittliste ============ */
+'use strict';
 
-const SCHRITTE = [
-  ['modul',  'Bibliothek laden'],
-  ['start',  'Dienst starten, Modelle holen'],
-  ['foto',   'Foto einlesen'],
-  ['lesen',  'Text erkennen']
-];
+/* ==================== Wortlisten ==================== */
 
+const BEZEICHNUNGEN = ['Licht','Steckdose','Steckdosen','Beleuchtung','E-Herd','Herd','Backofen',
+  'Geschirrspüler','Waschmaschine','Trockner','Kühlschrank','Mikrowelle','Dunstabzug',
+  'Fehlerstromschutzschalter','Überspannungsschutz','Überspannungsableiter','Hauptschalter',
+  'Stromstoßschalter','Trafo','CEE-Steckdose','Klingel','Durchlauferhitzer','Warmwasser',
+  'Boiler','Heizung','Rollladen','Arbeitsfläche','Außensteckdose','Reserve','Zuleitung','Garage'];
+
+const ORTE = ['Bad','Badezimmer','Küche','Flur','Diele','Wohnzimmer','Schlafzimmer','Kinderzimmer',
+  'Esszimmer','Büro','Balkon','Terrasse','Keller','Kammer','Speisekammer','Abstellraum',
+  'Hauswirtschaftsraum','Wohnung','WC','Gäste-WC','Garage','Dachboden'];
+
+const MODELLE = {
+  tiny:  {name:'v6 tiny',        konstante:null},
+  small: {name:'v6 small',       konstante:'V6_SMALL_MODEL'},
+  latin: {name:'v5 lateinisch',  konstante:'V5_LATIN_MOBILE_MODEL'}
+};
+
+const VERSION = 'v0.3 · 19.09.2026';
+
+/* ==================== Schrittliste ==================== */
+
+const SCHRITTE = [['modul','Bibliothek laden'],['start','Dienst starten, Modelle holen'],
+                  ['foto','Foto einlesen'],['lesen','Text erkennen'],['nach','Nachbearbeiten']];
 const liste = document.getElementById('schritte');
-const zeilen = {};
-
+const zeilenEl = {};
 SCHRITTE.forEach(([id, text]) => {
   const li = document.createElement('li');
   li.className = 'offen';
   li.innerHTML = '<span class="marke">·</span><span class="was"></span><span class="dauer"></span>';
   li.querySelector('.was').textContent = text;
   liste.appendChild(li);
-  zeilen[id] = li;
+  zeilenEl[id] = li;
 });
-
 function setze(id, zustand, zusatz, ms){
-  const li = zeilen[id];
-  if(!li) return;
+  const li = zeilenEl[id]; if(!li) return;
   li.className = zustand;
   li.querySelector('.marke').textContent =
     zustand === 'gut' ? '✓' : zustand === 'schlecht' ? '✗' : zustand === 'laeuft' ? '…' : '·';
   if(ms !== undefined) li.querySelector('.dauer').textContent = (ms/1000).toFixed(1) + ' s';
   let d = li.querySelector('.detail');
   if(zusatz){
-    if(!d){ d = document.createElement('span'); d.className = 'detail'; li.querySelector('.was').appendChild(d); }
+    if(!d){ d = document.createElement('span'); d.className='detail'; li.querySelector('.was').appendChild(d); }
     d.textContent = zusatz;
   }
 }
-
 const jetzt = () => performance.now();
-let protokoll = [];
-function notiz(t){ protokoll.push(t); }
 
-/* ============ Umgebung ============ */
+/* ==================== Umgebung ==================== */
 
+let umgebungText = '';
 (async function(){
-  const z = [];
-  z.push('Fassung: Sonde v0.1');
-  z.push('Bildschirm: ' + window.innerWidth + ' × ' + window.innerHeight);
-  z.push('Mehrkernig möglich (crossOriginIsolated): ' + (self.crossOriginIsolated ? 'ja' : 'nein'));
+  const z = ['Fassung: ' + VERSION,
+             'Bildschirm: ' + window.innerWidth + ' × ' + window.innerHeight,
+             'Mehrkernig möglich: ' + (self.crossOriginIsolated ? 'ja' : 'nein')];
   let gpu = 'nein';
-  try{
-    if(navigator.gpu){
-      const a = await navigator.gpu.requestAdapter();
-      gpu = a ? 'ja' : 'Schnittstelle da, kein Adapter';
-    }
-  }catch(e){ gpu = 'Fehler: ' + e.message; }
+  try{ if(navigator.gpu){ const a = await navigator.gpu.requestAdapter(); gpu = a ? 'ja' : 'kein Adapter'; } }
+  catch(e){ gpu = 'Fehler: ' + e.message; }
   z.push('WebGPU: ' + gpu);
   z.push('Kennung: ' + navigator.userAgent);
-  document.getElementById('umgebung').textContent = z.join('\n');
-  notiz(z.join('\n'));
+  umgebungText = z.join('\n');
+  document.getElementById('umgebung').textContent = umgebungText;
 })();
 
-/* ============ Bibliothek laden ============ */
+/* ==================== Bibliothek ==================== */
 
-/* Zwei Wege, weil ich die Einbindung hier nicht ausprobieren konnte.
-   Weg A nutzt die Importkarte oben, Weg B holt alles in einem Stück. */
 const WEGE = [
-  { name: 'esm.sh, getrennte Laufzeit',
-    url:  'https://esm.sh/ppu-paddle-ocr/web?external=onnxruntime-web' },
-  { name: 'esm.sh, alles in einem',
-    url:  'https://esm.sh/ppu-paddle-ocr/web' },
-  { name: 'jsDelivr',
-    url:  'https://cdn.jsdelivr.net/npm/ppu-paddle-ocr/+esm' }
+  {name:'esm.sh, getrennte Laufzeit', url:'https://esm.sh/ppu-paddle-ocr/web?external=onnxruntime-web'},
+  {name:'esm.sh, alles in einem',     url:'https://esm.sh/ppu-paddle-ocr/web'},
+  {name:'jsDelivr',                   url:'https://cdn.jsdelivr.net/npm/ppu-paddle-ocr/+esm'}
 ];
 
-let Sdk = null, dienst = null, gewaehlterWeg = '';
+let Modul = null, Sdk = null, dienst = null, gewaehlterWeg = '', aktivesModell = '';
 
 async function ladeModul(){
+  if(Sdk) return;
   const fehler = [];
   for(const weg of WEGE){
     try{
-      setze('modul', 'laeuft', 'versuche: ' + weg.name);
+      setze('modul','laeuft','versuche: ' + weg.name);
       const m = await import(/* @vite-ignore */ weg.url);
-      const Klasse = m.PaddleOcrService || (m.default && m.default.PaddleOcrService);
-      if(!Klasse) throw new Error('PaddleOcrService nicht im Modul gefunden');
-      Sdk = Klasse;
-      gewaehlterWeg = weg.name;
+      const K = m.PaddleOcrService || (m.default && m.default.PaddleOcrService);
+      if(!K) throw new Error('PaddleOcrService nicht gefunden');
+      Modul = m; Sdk = K; gewaehlterWeg = weg.name;
       return;
-    }catch(e){
-      fehler.push(weg.name + ': ' + (e && e.message ? e.message : e));
-    }
+    }catch(e){ fehler.push(weg.name + ': ' + (e && e.message ? e.message : e)); }
   }
   throw new Error('Kein Weg hat geklappt. ' + fehler.join(' | '));
 }
 
-/* ============ Ablauf ============ */
+async function starteDienst(modellId){
+  if(dienst){
+    try{ await dienst.destroy(); }catch(e){}
+    dienst = null;
+  }
+  const wahl = MODELLE[modellId] || MODELLE.tiny;
+  const opt = { recognition:{ mainThreadYieldMs: 24 }, debugging:{ verbose:false } };
+  let vermerk = wahl.name;
+  if(wahl.konstante){
+    if(Modul && Modul[wahl.konstante]) opt.model = Modul[wahl.konstante];
+    else vermerk = wahl.name + ' nicht verfügbar, es gilt die Vorgabe';
+  }
+  dienst = new Sdk(opt);
+  await dienst.initialize();
+  aktivesModell = modellId;
+  return vermerk;
+}
 
 document.getElementById('start').addEventListener('click', async function(){
   const knopf = this;
@@ -234,45 +339,378 @@ document.getElementById('start').addEventListener('click', async function(){
   let t0 = jetzt();
   try{
     await ladeModul();
-    setze('modul', 'gut', 'über ' + gewaehlterWeg, jetzt() - t0);
-    notiz('Modul geladen über ' + gewaehlterWeg);
+    setze('modul','gut','über ' + gewaehlterWeg, jetzt()-t0);
   }catch(e){
-    setze('modul', 'schlecht', e.message, jetzt() - t0);
-    notiz('MODUL GESCHEITERT: ' + e.message);
-    knopf.disabled = false;
-    return;
+    setze('modul','schlecht', e.message, jetzt()-t0);
+    knopf.disabled = false; return;
   }
-
   t0 = jetzt();
-  setze('start', 'laeuft', 'Modelle werden geladen, rund 6 MB');
+  setze('start','laeuft','Modelle werden geladen');
   try{
-    dienst = new Sdk({
-      recognition: { mainThreadYieldMs: 24 },
-      debugging: { verbose: false }
-    });
-    await dienst.initialize();
-    setze('start', 'gut', '', jetzt() - t0);
-    notiz('Dienst gestartet in ' + ((jetzt()-t0)/1000).toFixed(1) + ' s');
+    const vermerk = await starteDienst(document.getElementById('modell').value);
+    setze('start','gut', vermerk, jetzt()-t0);
     document.getElementById('fotokarte').style.display = 'block';
+    knopf.textContent = 'Bereit';
   }catch(e){
-    setze('start', 'schlecht', (e && e.message ? e.message : String(e)), jetzt() - t0);
-    notiz('START GESCHEITERT: ' + e.message);
+    setze('start','schlecht',(e && e.message ? e.message : String(e)), jetzt()-t0);
     knopf.disabled = false;
-    return;
   }
-  knopf.textContent = 'Bereit';
 });
 
-/* ============ Foto und Erkennung ============ */
+document.getElementById('modell').addEventListener('change', async function(){
+  if(!Sdk) return;
+  const knopf = document.getElementById('start');
+  knopf.disabled = true; knopf.textContent = 'Modell wird gewechselt';
+  const t0 = jetzt();
+  setze('start','laeuft','Modellwechsel');
+  try{
+    const vermerk = await starteDienst(this.value);
+    setze('start','gut', vermerk, jetzt()-t0);
+    knopf.textContent = 'Bereit';
+  }catch(e){
+    setze('start','schlecht', e.message, jetzt()-t0);
+    knopf.textContent = 'Engine laden und vorbereiten';
+    knopf.disabled = false;
+  }
+});
 
-let leinwand = document.getElementById('leinwand');
+/* ==================== Bild: Graustufen, Otsu, Entzerren ==================== */
+
+function graustufen(canvas){
+  const ctx = canvas.getContext('2d');
+  const bild = ctx.getImageData(0,0,canvas.width,canvas.height);
+  const d = bild.data, n = canvas.width*canvas.height;
+  const grau = new Uint8Array(n), hist = new Array(256).fill(0);
+  for(let i=0;i<n;i++){
+    const g = (d[i*4]*0.299 + d[i*4+1]*0.587 + d[i*4+2]*0.114) | 0;
+    grau[i] = g; hist[g]++;
+  }
+  return {bild, grau, hist, n};
+}
+
+function otsu(hist, gesamt){
+  let summe = 0;
+  for(let i=0;i<256;i++) summe += i*hist[i];
+  let summeB=0, wB=0, max=0, schwelle=128;
+  for(let i=0;i<256;i++){
+    wB += hist[i]; if(!wB) continue;
+    const wF = gesamt - wB; if(!wF) break;
+    summeB += i*hist[i];
+    const mB = summeB/wB, mF = (summe-summeB)/wF;
+    const zw = wB*wF*(mB-mF)*(mB-mF);
+    if(zw > max){ max = zw; schwelle = i; }
+  }
+  return schwelle;
+}
+
+/* Schräglage über das Schwärzungsprofil: der Winkel, bei dem die Zeilen am
+   schärfsten übereinanderliegen. Übernommen aus ocr-test.html v0.6. */
+function schraeglage(canvas){
+  const br = 500, f = br/canvas.width;
+  const h = Math.max(2, Math.round(canvas.height*f));
+  const k = document.createElement('canvas');
+  k.width = br; k.height = h;
+  k.getContext('2d').drawImage(canvas, 0,0, br, h);
+  const t = graustufen(k);
+  const s = otsu(t.hist, t.n);
+  const bin = new Uint8Array(t.n);
+  for(let i=0;i<t.n;i++) bin[i] = t.grau[i] < s ? 1 : 0;
+
+  let bester = 0, besteVar = -1;
+  for(let grad = -5; grad <= 5.0001; grad += 0.25){
+    const m = Math.tan(grad*Math.PI/180);
+    const prof = new Float64Array(h);
+    for(let x=0;x<br;x++){
+      const off = Math.round(x*m);
+      for(let y=0;y<h;y++){
+        if(bin[y*br+x]){
+          const yy = y - off;
+          if(yy>=0 && yy<h) prof[yy]++;
+        }
+      }
+    }
+    let mw = 0;
+    for(let i=0;i<h;i++) mw += prof[i];
+    mw /= h;
+    let v = 0;
+    for(let i=0;i<h;i++){ const dd = prof[i]-mw; v += dd*dd; }
+    if(v > besteVar){ besteVar = v; bester = grad; }
+  }
+  return bester;
+}
+
+function drehenUm(canvas, grad){
+  if(Math.abs(grad) < 0.12) return canvas;
+  const c = document.createElement('canvas');
+  c.width = canvas.width; c.height = canvas.height;
+  const x = c.getContext('2d');
+  x.fillStyle = '#FFFFFF'; x.fillRect(0,0,c.width,c.height);
+  x.translate(c.width/2, c.height/2);
+  x.rotate(-grad*Math.PI/180);
+  x.drawImage(canvas, -canvas.width/2, -canvas.height/2);
+  return c;
+}
+
+/* ==================== Zeilen und Spalten ==================== */
+
+function zeilenBilden(woerter){
+  const zeilen = [];
+  zeilen.hoehe = 40;
+  const gueltig = woerter.filter(w => w.bbox && (w.text||'').trim());
+  if(!gueltig.length) return zeilen;
+  const hoehen = gueltig.map(w => w.bbox.y1-w.bbox.y0).sort((a,b)=>a-b);
+  const hoehe = hoehen[Math.floor(hoehen.length/2)] || 10;
+  const tol = Math.max(6, hoehe*0.6);
+  const sortiert = gueltig.slice().sort((a,b) =>
+    (a.bbox.y0+a.bbox.y1)/2 - (b.bbox.y0+b.bbox.y1)/2);
+  sortiert.forEach(w => {
+    const mitte = (w.bbox.y0+w.bbox.y1)/2;
+    const letzte = zeilen[zeilen.length-1];
+    if(letzte && Math.abs(mitte-letzte.mitte) <= tol){
+      letzte.woerter.push(w); letzte.summe += mitte;
+      letzte.mitte = letzte.summe/letzte.woerter.length;
+    } else {
+      zeilen.push({woerter:[w], mitte, summe:mitte});
+    }
+  });
+  zeilen.forEach(z => {
+    z.woerter.sort((a,b) => a.bbox.x0-b.bbox.x0);
+    z.text = z.woerter.map(w => w.text).join(' ');
+    z.conf = z.woerter.reduce((s,w) => s + (w.confidence||0), 0) / z.woerter.length;
+  });
+  zeilen.hoehe = hoehe;
+  return zeilen;
+}
+
+function mittelwert(a){ return a.length ? a.reduce((s,v)=>s+v,0)/a.length : 0; }
+function streuung(a){ const m = mittelwert(a); return a.reduce((s,v)=>s+(v-m)*(v-m),0); }
+function median(a){
+  if(!a.length) return 0;
+  const b = a.slice().sort((x,y)=>x-y);
+  return b[Math.floor(b.length/2)];
+}
+
+/* Spaltengrenzen aus den Lücken ZWISCHEN den Wörtern. Zugeordnet wird danach
+   über die Wortmitte – nie über einen Schnitt durchs Bild, sonst werden
+   Buchstaben abgeschnitten (die teure Lehre aus ocr-test v0.4). */
+function spaltenFinden(woerter, breite){
+  const zeilen = zeilenBilden(woerter);
+  const hoehe = zeilen.hoehe || 30;
+  const minLuecke = hoehe * 1.1;
+  const mitten = [];
+  zeilen.forEach(z => {
+    for(let i=1;i<z.woerter.length;i++){
+      const a = z.woerter[i-1].bbox.x1, b = z.woerter[i].bbox.x0;
+      if(b - a >= minLuecke) mitten.push((a+b)/2);
+    }
+  });
+  if(mitten.length < 3) return null;
+  mitten.sort((a,b)=>a-b);
+  let bestI = -1, bestWert = Infinity;
+  for(let i=1;i<mitten.length;i++){
+    const wert = streuung(mitten.slice(0,i)) + streuung(mitten.slice(i));
+    if(wert < bestWert){ bestWert = wert; bestI = i; }
+  }
+  if(bestI < 1) return null;
+  const g0 = median(mitten.slice(0,bestI));
+  const g1 = median(mitten.slice(bestI));
+  if(g1 - g0 < breite*0.08) return null;
+  return {g0, g1, hoehe};
+}
+
+function zuordnen(woerter, g0, g1){
+  const gruppen = [[],[],[]];
+  woerter.forEach(w => {
+    if(!w.bbox) return;
+    const mx = (w.bbox.x0 + w.bbox.x1)/2;
+    gruppen[mx < g0 ? 0 : (mx < g1 ? 1 : 2)].push(w);
+  });
+  return gruppen;
+}
+
+/* ==================== Nachbearbeitung ==================== */
+
+function saeubern(t){
+  let s = (t||'').replace(/[_;·"'‚„”“®]/g,' ').replace(/\s+/g,' ').trim();
+  s = s.replace(/^[\s|\-–.,:\/]+/,'').replace(/[\s|\-–.,:\/]+$/,'');
+  s = s.replace(/\s*\|\s*/g,' / ');
+  return s.replace(/\s+/g,' ').trim();
+}
+
+function nurZiffern(t){
+  return (t||'').replace(/[–—]/g,'-').replace(/[^0-9\-\/]/g,'');
+}
+
+const ZU_ZIFFER = {'l':'1','I':'1','i':'1','|':'1','O':'0','o':'0','Q':'0','D':'0',
+  'S':'5','s':'5','B':'8','Z':'2','z':'2','G':'6','T':'7','g':'9','A':'4','b':'6'};
+
+const VERWECHSLUNG = {'4':['1','7'],'1':['4','7'],'7':['1','4'],'0':['8','6','9'],
+  '8':['0','6','9','3'],'6':['5','8','0'],'5':['6','8','3','9'],'9':['8','0','4','3'],
+  '3':['8','5','9','2'],'2':['7','3']};
+
+function nurNummer(t){
+  let raus = '';
+  t = (t||'');
+  for(let i=0;i<t.length;i++){
+    const c = t.charAt(i);
+    if(/[0-9\/]/.test(c)) raus += c;
+    else if(c === '-' || c === '–' || c === '—') raus += '-';
+    else if(ZU_ZIFFER[c]) raus += ZU_ZIFFER[c];
+  }
+  /* Trennzeichen ohne Ziffer auf beiden Seiten stammt vom Tabellenstrich */
+  let sauber = '';
+  for(let i=0;i<raus.length;i++){
+    const c = raus.charAt(i);
+    if(c === '-' || c === '/'){
+      const v = i>0 ? raus.charAt(i-1) : '';
+      const n = i<raus.length-1 ? raus.charAt(i+1) : '';
+      if(!/[0-9]/.test(v) || !/[0-9]/.test(n)) continue;
+    }
+    sauber += c;
+  }
+  return sauber;
+}
+
+function zerlege(t){
+  let m;
+  if((m = /^(\d+)-(\d+)$/.exec(t)))  return {art:'-', a:+m[1], b:+m[2]};
+  if((m = /^(\d+)\/(\d+)$/.exec(t))) return {art:'/', a:+m[1], b:+m[2]};
+  if((m = /^(\d+)$/.exec(t)))        return {art:'',  a:+m[1], b:+m[1]};
+  return null;
+}
+
+function schreibe(z){
+  if(z.art === '/') return z.a + '/' + z.b;
+  if(z.a === z.b) return '' + z.a;
+  return z.a + '-' + z.b;
+}
+
+function varianten(text){
+  const raus = [text];
+  for(let i=0;i<text.length;i++){
+    const ersatz = VERWECHSLUNG[text.charAt(i)];
+    if(!ersatz) continue;
+    ersatz.forEach(e => raus.push(text.substring(0,i) + e + text.substring(i+1)));
+  }
+  return raus;
+}
+
+function versuche(t, erwartet){
+  const z = zerlege(t);
+  if(z && z.a === erwartet && z.b >= z.a)
+    return {a:z.a, b:z.b, text:schreibe(z), geaendert:false};
+  if(/^\d{3,4}$/.test(t)){
+    for(let s=1;s<t.length-1;s++){
+      const links = +t.substring(0,s), rechts = +t.substring(s+1);
+      if(links === erwartet && rechts === erwartet+1)
+        return {a:links, b:rechts, text:links+'/'+rechts, geaendert:true};
+    }
+  }
+  const kand = varianten(t);
+  for(let i=0;i<kand.length;i++){
+    const zz = zerlege(kand[i]);
+    if(zz && zz.a === erwartet && zz.b >= zz.a && (zz.b - zz.a) < 12)
+      return {a:zz.a, b:zz.b, text:schreibe(zz), geaendert:(kand[i] !== t)};
+  }
+  return null;
+}
+
+/* Stromkreisnummern laufen aufsteigend und lückenlos. Trifft eine spätere
+   Nummer, fehlt dazwischen eine Zeile – das wird gemeldet statt verschoben. */
+function nummerDeuten(roh, erwartet){
+  const t = nurNummer(roh);
+  const erg = {roh, text: t || '—', geaendert:false, unklar:false, luecke:0, a:null, b:null};
+  for(let e = erwartet; e <= erwartet + 4; e++){
+    const v = versuche(t, e);
+    if(v){
+      erg.a = v.a; erg.b = v.b; erg.text = v.text;
+      erg.geaendert = v.geaendert; erg.luecke = e - erwartet;
+      return erg;
+    }
+  }
+  const z = zerlege(t);
+  if(z){ erg.a = z.a; erg.b = Math.max(z.a, z.b); erg.text = schreibe(z); }
+  erg.unklar = true;
+  return erg;
+}
+
+function abstand(a, b){
+  a = a.toLowerCase(); b = b.toLowerCase();
+  const m = a.length, n = b.length;
+  if(!m) return n;
+  if(!n) return m;
+  let v0 = [], v1 = [];
+  for(let j=0;j<=n;j++) v0[j] = j;
+  for(let i=1;i<=m;i++){
+    v1[0] = i;
+    for(let j=1;j<=n;j++){
+      const kosten = a.charAt(i-1) === b.charAt(j-1) ? 0 : 1;
+      v1[j] = Math.min(v1[j-1]+1, v0[j]+1, v0[j-1]+kosten);
+    }
+    for(let j=0;j<=n;j++) v0[j] = v1[j];
+  }
+  return v0[n];
+}
+
+function besteWahl(wort, liste){
+  const w = saeubern(wort);
+  if(!w) return null;
+  let best = null, bestD = 999, zweitD = 999;
+  liste.forEach(k => {
+    const d = abstand(w, k);
+    if(d < bestD){ zweitD = bestD; bestD = d; best = k; }
+    else if(d < zweitD) zweitD = d;
+  });
+  if(!best) return null;
+  const grenze = Math.max(1, Math.round(Math.max(w.length, best.length) * 0.35));
+  if(bestD > grenze) return null;
+  if(bestD > 0 && zweitD === bestD) return null;   /* nicht eindeutig */
+  return {wort:best, d:bestD};
+}
+
+function textDeuten(roh, liste){
+  const t = saeubern(roh);
+  const erg = {roh, text:'', geaendert:false, leer:false};
+  if(!t){ erg.leer = true; return erg; }
+
+  const sk = /stromkre\S*/i.exec(t);
+  if(sk){
+    const zahlen = nurZiffern(t.substring(sk.index + sk[0].length));
+    if(!zahlen) return {roh, text:'Stromkreis', geaendert:true, leer:false};
+    erg.text = 'Stromkreis ' + zahlen.replace(/-/g,' - ');
+    erg.geaendert = (erg.text !== t);
+    return erg;
+  }
+
+  const teile = t.split('/');
+  const raus = [];
+  let fehl = false;
+  teile.forEach(teil => {
+    const tr = saeubern(teil);
+    if(!tr) return;
+    const w = besteWahl(tr, liste);
+    if(w) raus.push(w.wort); else fehl = true;
+  });
+  if(raus.length && !fehl){
+    erg.text = raus.join(' / ');
+    erg.geaendert = (erg.text !== t);
+    return erg;
+  }
+  erg.leer = true;
+  return erg;
+}
+
+/* ==================== Ablauf: Foto lesen ==================== */
+
+let quelle = null;         /* Canvas mit dem entzerrten Bild */
+let letzteAusgabe = '';
+const leinwand = document.getElementById('leinwand');
 
 document.getElementById('datei').addEventListener('change', async function(e){
   const datei = e.target.files && e.target.files[0];
   if(!datei || !dienst) return;
-
   let t0 = jetzt();
-  setze('foto', 'laeuft');
+  setze('foto','laeuft');
   try{
     let bm;
     try{ bm = await createImageBitmap(datei, {imageOrientation:'from-image'}); }
@@ -283,103 +721,402 @@ document.getElementById('datei').addEventListener('change', async function(e){
         i.src = URL.createObjectURL(datei);
       });
     }
-    /* auf höchstens 2000 px herunterrechnen, wie bei den Tesseract-Läufen */
     const f = Math.min(1, 2000 / bm.width);
-    leinwand.width = Math.round(bm.width * f);
-    leinwand.height = Math.round(bm.height * f);
-    const ctx = leinwand.getContext('2d');
+    const c = document.createElement('canvas');
+    c.width = Math.round(bm.width*f);
+    c.height = Math.round(bm.height*f);
+    const ctx = c.getContext('2d');
     ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(bm, 0, 0, leinwand.width, leinwand.height);
+    ctx.drawImage(bm, 0, 0, c.width, c.height);
     if(bm.close) bm.close();
+    quelle = c;
     document.getElementById('fotoinfo').textContent =
-      leinwand.width + ' × ' + leinwand.height + ' Bildpunkte, ' + Math.round(datei.size/1024) + ' KB';
-    setze('foto', 'gut', '', jetzt() - t0);
+      c.width + ' × ' + c.height + ' Bildpunkte, ' + Math.round(datei.size/1024) + ' KB';
+    setze('foto','gut','', jetzt()-t0);
+    document.getElementById('nochmal').disabled = false;
   }catch(err){
-    setze('foto', 'schlecht', err.message, jetzt() - t0);
+    setze('foto','schlecht', err.message, jetzt()-t0);
     return;
   }
-
-  t0 = jetzt();
-  setze('lesen', 'laeuft', 'das kann einige Sekunden dauern');
-  await new Promise(r => setTimeout(r, 30));
-  try{
-    const erg = await dienst.recognize(leinwand);
-    const dauer = jetzt() - t0;
-    setze('lesen', 'gut', '', dauer);
-    zeigeErgebnis(erg, dauer);
-  }catch(err){
-    setze('lesen', 'schlecht', (err && err.message ? err.message : String(err)), jetzt() - t0);
-    notiz('LESEN GESCHEITERT: ' + err.message);
-  }
+  await lauf();
 });
 
-function zeigeErgebnis(erg, dauer){
-  document.getElementById('ergebnis').style.display = 'block';
+document.getElementById('nochmal').addEventListener('click', lauf);
 
-  const text = (erg && erg.text) ? erg.text : '(kein text-Feld in der Rückgabe)';
-  document.getElementById('text').textContent = text;
+async function lauf(){
+  if(!quelle || !dienst) return;
+  document.getElementById('nochmal').disabled = true;
 
-  /* Der Aufbau der Rückgabe ist das eigentlich Wertvolle dieser Etappe:
-     daran hängt, wie die Spaltenlogik aus ocr-test.html andocken kann. */
-  const bau = [];
-  bau.push('Oberste Felder: ' + Object.keys(erg || {}).join(', '));
-  const kandidat = erg.lines || erg.results || erg.boxes || erg.items || null;
-  if(Array.isArray(kandidat) && kandidat.length){
-    bau.push('Liste mit ' + kandidat.length + ' Einträgen, erster Eintrag:');
-    bau.push(JSON.stringify(kandidat[0], null, 1).slice(0, 700));
-  } else {
-    bau.push('Keine offensichtliche Liste gefunden. Ganze Rückgabe, gekürzt:');
-    bau.push(JSON.stringify(erg, null, 1).slice(0, 900));
+  let winkel = 0;
+  let arbeit = quelle;
+  if(document.getElementById('optEntzerren').checked){
+    try{
+      winkel = schraeglage(quelle);
+      arbeit = drehenUm(quelle, winkel);
+    }catch(e){ winkel = 0; arbeit = quelle; }
   }
-  document.getElementById('struktur').textContent = bau.join('\n');
 
-  const zahl = Array.isArray(kandidat) ? kandidat.length : 0;
-  document.getElementById('zahlen').textContent =
-    dauer.toFixed(0) + ' ms für die Erkennung · ' + zahl + ' Einträge · geladen über ' + gewaehlterWeg;
-
-  /* Kästen einzeichnen, soweit sich welche finden lassen */
+  let t0 = jetzt();
+  setze('lesen','laeuft');
+  await new Promise(r => setTimeout(r, 30));
+  let erg;
   try{
-    const ctx = leinwand.getContext('2d');
-    ctx.lineWidth = Math.max(1, Math.round(leinwand.width/700));
-    ctx.strokeStyle = '#7CA82C';
-    (Array.isArray(kandidat) ? kandidat : []).forEach(function(e){
-      const b = e.box || e.bbox || e.rect || e;
-      if(b && typeof b.x === 'number' && typeof b.width === 'number'){
-        ctx.strokeRect(b.x, b.y, b.width, b.height);
-      } else if(b && typeof b.x0 === 'number'){
-        ctx.strokeRect(b.x0, b.y0, b.x1-b.x0, b.y1-b.y0);
-      }
-    });
-  }catch(e){ /* Kästen sind Zugabe, kein Grund zu scheitern */ }
+    erg = await dienst.recognize(arbeit);
+    setze('lesen','gut','', jetzt()-t0);
+  }catch(err){
+    setze('lesen','schlecht',(err && err.message ? err.message : String(err)), jetzt()-t0);
+    document.getElementById('nochmal').disabled = false;
+    return;
+  }
+  const leseDauer = jetzt()-t0;
 
-  notiz('--- Text ---\n' + text + '\n--- Aufbau ---\n' + bau.join('\n'));
+  t0 = jetzt();
+  setze('nach','laeuft');
+  try{
+    verarbeite(erg, arbeit, winkel, leseDauer);
+    setze('nach','gut','', jetzt()-t0);
+  }catch(err){
+    setze('nach','schlecht', err.message, jetzt()-t0);
+  }
+  document.getElementById('nochmal').disabled = false;
 }
 
-/* ============ Mitnehmen ============ */
+/* Paddle liefert lines: Liste von Zeilen, je Zeile eine Liste von Wörtern
+   mit box {x,y,width,height} und confidence 0..1. Wir bringen das auf die
+   Form, mit der die Logik aus ocr-test v0.6 arbeitet. */
+function holeWoerter(erg){
+  const raus = [];
+  const zeilen = Array.isArray(erg.lines) ? erg.lines : [];
+  zeilen.forEach((zeile, zi) => {
+    const woerter = Array.isArray(zeile) ? zeile : (zeile && zeile.words) ? zeile.words : [zeile];
+    woerter.forEach(w => {
+      if(!w) return;
+      const b = w.box || w.bbox || w.rect;
+      if(!b) return;
+      const x0 = (b.x !== undefined) ? b.x : b.x0;
+      const y0 = (b.y !== undefined) ? b.y : b.y0;
+      const br = (b.width  !== undefined) ? b.width  : (b.x1 - b.x0);
+      const ho = (b.height !== undefined) ? b.height : (b.y1 - b.y0);
+      raus.push({
+        text: (w.text || '').trim(),
+        bbox: {x0, y0, x1: x0+br, y1: y0+ho},
+        confidence: (w.confidence !== undefined ? w.confidence : 1) * 100,
+        zeile: zi,
+        behalten: true
+      });
+    });
+  });
+  return raus;
+}
+
+function verarbeite(erg, arbeit, winkel, leseDauer){
+  const alle = holeWoerter(erg);
+  const schwelle = parseFloat(document.getElementById('schwelle').value) * 100;
+  const kopfWeg = document.getElementById('optKopf').checked;
+  const spalten = document.getElementById('optSpalten').checked;
+  const nach = document.getElementById('optNach').checked;
+
+  /* 1. Sicherheitsschwelle */
+  alle.forEach(w => { if(w.confidence < schwelle) w.behalten = false; });
+
+  /* 2. Kopf abschneiden: alles oberhalb der obersten lesbaren Stromkreisnummer
+        im linken Drittel. Der Firmenkopf sitzt darüber und gehört nicht dazu. */
+  let schnitt = null;
+  if(kopfWeg){
+    const drittel = arbeit.width / 3;
+    let oben = Infinity;
+    alle.forEach(w => {
+      if(!w.behalten) return;
+      const mx = (w.bbox.x0 + w.bbox.x1)/2;
+      if(mx > drittel) return;
+      if(!zerlege(nurNummer(w.text))) return;
+      if(w.bbox.y0 < oben) oben = w.bbox.y0;
+    });
+    if(oben !== Infinity){
+      const hoehe = zeilenBilden(alle.filter(w=>w.behalten)).hoehe || 30;
+      schnitt = oben - hoehe*0.6;
+      alle.forEach(w => {
+        if((w.bbox.y0 + w.bbox.y1)/2 < schnitt) w.behalten = false;
+      });
+    }
+  }
+
+  const gueltig = alle.filter(w => w.behalten);
+
+  /* 3. Spalten */
+  let grenzen = null, gruppen = null;
+  if(spalten && gueltig.length){
+    const gr = spaltenFinden(gueltig, arbeit.width);
+    if(gr){
+      grenzen = [gr.g0, gr.g1];
+      gruppen = zuordnen(gueltig, gr.g0, gr.g1);
+    }
+  }
+
+  /* 4. Anzeige */
+  const summe = gueltig.reduce((s,w)=>s+(w.confidence||0),0);
+  document.getElementById('zDauer').textContent  = (leseDauer/1000).toFixed(1);
+  document.getElementById('zWoerter').textContent = gueltig.length + ' / ' + alle.length;
+  document.getElementById('zSicher').textContent  = gueltig.length ? Math.round(summe/gueltig.length) + ' %' : '–';
+  document.getElementById('zWinkel').textContent  = winkel ? winkel.toFixed(2) + '°' : '0°';
+
+  const ziel = document.getElementById('tabelle');
+  ziel.innerHTML = '';
+  let tabellenText = '';
+  if(gruppen){
+    const teile = [
+      {name:'Nummer',      zeilen: zeilenBilden(gruppen[0])},
+      {name:'Bezeichnung', zeilen: zeilenBilden(gruppen[1])},
+      {name:'Ort',         zeilen: zeilenBilden(gruppen[2])}
+    ];
+    const gebaut = baueTabelle(teile, nach);
+    ziel.appendChild(gebaut.knoten);
+    tabellenText = gebaut.text;
+  } else {
+    const hw = document.createElement('p');
+    hw.className = 'zaehlung krumm';
+    hw.textContent = spalten ? 'Die Spalten ließen sich nicht finden – hier die Zeilen, wie sie kamen.'
+                             : 'Spaltentrennung ist abgeschaltet.';
+    ziel.appendChild(hw);
+    zeilenBilden(gueltig).forEach(z => {
+      const d = document.createElement('div');
+      d.style.padding = '7px 0';
+      d.style.borderTop = '1px solid #E2E4DC';
+      d.textContent = z.text;
+      ziel.appendChild(d);
+      tabellenText += z.text + '\n';
+    });
+  }
+
+  /* 5. Bild */
+  leinwand.width = arbeit.width; leinwand.height = arbeit.height;
+  const x = leinwand.getContext('2d');
+  x.drawImage(arbeit, 0, 0);
+  x.lineWidth = Math.max(1, Math.round(arbeit.width/700));
+  const farben = ['#C0392B','#7CA82C','#1E6FD9'];
+  alle.forEach(w => {
+    if(!w.behalten){ x.strokeStyle = '#B9BDB2'; }
+    else if(grenzen){
+      const mx = (w.bbox.x0 + w.bbox.x1)/2;
+      x.strokeStyle = farben[mx < grenzen[0] ? 0 : (mx < grenzen[1] ? 1 : 2)];
+    } else x.strokeStyle = '#7CA82C';
+    x.strokeRect(w.bbox.x0, w.bbox.y0, w.bbox.x1-w.bbox.x0, w.bbox.y1-w.bbox.y0);
+  });
+  if(grenzen){
+    x.strokeStyle = '#1E6FD9';
+    x.lineWidth = Math.max(2, Math.round(arbeit.width/500));
+    grenzen.forEach(px => { x.beginPath(); x.moveTo(px,0); x.lineTo(px,arbeit.height); x.stroke(); });
+  }
+  if(schnitt !== null && schnitt > 0){
+    x.strokeStyle = '#D98E0B';
+    x.setLineDash([12,10]);
+    x.beginPath(); x.moveTo(0,schnitt); x.lineTo(arbeit.width,schnitt); x.stroke();
+    x.setLineDash([]);
+  }
+
+  /* 6. Rohtext */
+  const rt = document.getElementById('rohtexte');
+  rt.innerHTML = '';
+  const roh = (erg.text || '').trim();
+  const kz = 'Kennzahlen: ' + (leseDauer/1000).toFixed(1) + ' s · ' +
+             gueltig.length + ' von ' + alle.length + ' Wörtern behalten · ' +
+             (gueltig.length ? Math.round(summe/gueltig.length) : 0) + ' % mittlere Sicherheit · ' +
+             (winkel ? winkel.toFixed(2) : '0') + '° Schräglage\n' +
+             'Einstellungen: Modell ' + (MODELLE[aktivesModell] ? MODELLE[aktivesModell].name : aktivesModell) +
+             ', Schwelle ' + document.getElementById('schwelle').value +
+             (document.getElementById('optEntzerren').checked ? ', entzerrt' : ', nicht entzerrt') +
+             (kopfWeg ? ', Kopf verworfen' : '') +
+             (grenzen ? ', Spalten bei ' + Math.round(grenzen[0]) + ' und ' + Math.round(grenzen[1]) + ' von ' + arbeit.width : ', ohne Spalten') +
+             (nach ? ', nachbearbeitet' : '') + '\n' +
+             'Fassung: ' + VERSION;
+
+  [['Rohtext der Engine', roh], ['Tabelle', tabellenText.trim()], ['Kennzahlen', kz]].forEach(([titel, inhalt]) => {
+    const h = document.createElement('h3');
+    h.className = 'klein'; h.textContent = titel;
+    const pre = document.createElement('pre');
+    pre.textContent = inhalt || '(leer)';
+    rt.appendChild(h); rt.appendChild(pre);
+  });
+
+  letzteAusgabe = umgebungText + '\n\n--- Rohtext ---\n' + roh +
+                  '\n\n--- Tabelle ---\n' + tabellenText.trim() + '\n\n' + kz;
+
+  document.getElementById('ergebnis').style.display = 'block';
+}
+
+/* ==================== Tabelle bauen ==================== */
+
+function baueTabelle(teile, nach){
+  const nr = teile[0].zeilen, bez = teile[1].zeilen, ort = teile[2].zeilen;
+  const hoehe = nr.hoehe || bez.hoehe || 40;
+  const tol = hoehe * 1.1;
+  const benutztB = {}, benutztO = {};
+  let text = '';
+
+  function naechste(liste, mitte, benutzt){
+    let best = -1, bestD = Infinity;
+    for(let i=0;i<liste.length;i++){
+      const d = Math.abs(liste[i].mitte - mitte);
+      if(d < bestD){ bestD = d; best = i; }
+    }
+    if(best < 0 || bestD > tol) return null;
+    const doppelt = !!benutzt[best];
+    benutzt[best] = true;
+    return {zeile: liste[best], doppelt};
+  }
+
+  const tab = document.createElement('table');
+  tab.className = 'erg';
+  tab.innerHTML = '<thead><tr><th>Nr.</th><th>Bezeichnung</th><th>Ort</th></tr></thead>';
+  const koerper = document.createElement('tbody');
+  let erwartet = 1;
+
+  nr.forEach(z => {
+    const n = nach ? nummerDeuten(z.text, erwartet)
+                   : {text: saeubern(z.text) || '—', roh:z.text, geaendert:false, unklar:false, luecke:0, b:null};
+    if(n.luecke > 0){
+      const warn = document.createElement('tr');
+      const wtd = document.createElement('td');
+      wtd.colSpan = 3; wtd.className = 'luecke-zeile';
+      wtd.textContent = n.luecke === 1
+        ? 'Hier fehlt eine Zeile – Nummer ' + erwartet + ' wurde nicht gelesen'
+        : 'Hier fehlen ' + n.luecke + ' Zeilen – ab Nummer ' + erwartet;
+      warn.appendChild(wtd);
+      koerper.appendChild(warn);
+      text += '[' + wtd.textContent + ']\n';
+    }
+    const tr = document.createElement('tr');
+    if(n.b !== null && n.b !== undefined) erwartet = n.b + 1;
+    tr.appendChild(zelle(n.text, z.text, n.geaendert, n.unklar, false, 'nr'));
+
+    const paare = [[naechste(bez, z.mitte, benutztB), BEZEICHNUNGEN],
+                   [naechste(ort, z.mitte, benutztO), ORTE.concat(BEZEICHNUNGEN)]];
+    const felder = [n.text];
+    paare.forEach(p => {
+      const tref = p[0];
+      if(!tref){ tr.appendChild(zelle('—','',false,false,true,'')); felder.push('—'); return; }
+      const d = nach ? textDeuten(tref.zeile.text, p[1])
+                     : {text: saeubern(tref.zeile.text), roh:tref.zeile.text, geaendert:false, leer:false};
+      tr.appendChild(zelle(d.leer ? '—' : d.text, tref.zeile.text, d.geaendert, false, d.leer || tref.doppelt, ''));
+      felder.push(d.leer ? '—' : d.text);
+    });
+    koerper.appendChild(tr);
+    text += felder.join(' | ') + '\n';
+  });
+
+  tab.appendChild(koerper);
+  const huelle = document.createElement('div');
+
+  const zaehl = document.createElement('p');
+  zaehl.className = 'zaehlung';
+  const leer = [];
+  if(!nr.length)  leer.push('Nummer');
+  if(!bez.length) leer.push('Bezeichnung');
+  if(!ort.length) leer.push('Ort');
+  if(leer.length){
+    zaehl.className += ' krumm';
+    zaehl.textContent = 'Leer geblieben: ' + leer.join(', ') + '.';
+  } else {
+    zaehl.textContent = 'Gefundene Zeilen – Nummer ' + nr.length + ', Bezeichnung ' + bez.length + ', Ort ' + ort.length;
+    if(!(nr.length === bez.length && bez.length === ort.length)){
+      zaehl.className += ' krumm';
+      zaehl.textContent += ' (ungleich)';
+    }
+  }
+  text = zaehl.textContent + '\n' + text;
+  huelle.appendChild(zaehl);
+  huelle.appendChild(tab);
+
+  const rest = [];
+  bez.forEach((z,i) => { if(!benutztB[i]) rest.push('Bezeichnung: ' + saeubern(z.text)); });
+  ort.forEach((z,i) => { if(!benutztO[i]) rest.push('Ort: ' + saeubern(z.text)); });
+  if(rest.length){
+    const h = document.createElement('h3');
+    h.className = 'klein'; h.textContent = 'Keiner Nummer zugeordnet';
+    const ul = document.createElement('ul');
+    rest.forEach(r => {
+      const li = document.createElement('li');
+      li.style.fontSize = '14px'; li.style.color = '#6B7065';
+      li.textContent = r;
+      ul.appendChild(li);
+    });
+    huelle.appendChild(h); huelle.appendChild(ul);
+    text += 'Keiner Nummer zugeordnet: ' + rest.join('; ') + '\n';
+  }
+  return {knoten: huelle, text};
+}
+
+function zelle(text, roh, geaendert, unklar, leer, klasse){
+  const td = document.createElement('td');
+  if(klasse) td.className = klasse;
+  const s = document.createElement('span');
+  s.textContent = text;
+  if(geaendert) s.className = 'geaendert';
+  if(unklar) s.className = 'unklar';
+  if(leer) s.className = 'leer';
+  td.appendChild(s);
+  if(roh && saeubern(roh) !== text){
+    const r = document.createElement('span');
+    r.className = 'klein-roh';
+    r.textContent = 'gelesen: ' + roh;
+    td.appendChild(r);
+  }
+  return td;
+}
+
+/* ==================== Reiter, Kopieren, Teilen ==================== */
+
+Array.prototype.forEach.call(document.querySelectorAll('.reiter button'), b => {
+  b.addEventListener('click', () => {
+    Array.prototype.forEach.call(document.querySelectorAll('.reiter button'),
+      o => o.setAttribute('aria-selected', o === b ? 'true' : 'false'));
+    Array.prototype.forEach.call(document.querySelectorAll('.tafel'),
+      t => t.classList.toggle('an', t.id === b.dataset.tafel));
+  });
+});
 
 document.getElementById('kopieren').addEventListener('click', function(){
   const knopf = this;
-  const alles = protokoll.join('\n\n');
   if(navigator.clipboard && navigator.clipboard.writeText){
-    navigator.clipboard.writeText(alles).then(function(){
+    navigator.clipboard.writeText(letzteAusgabe).then(() => {
       knopf.textContent = 'Kopiert';
-      setTimeout(function(){ knopf.textContent = 'Alles kopieren'; }, 1600);
+      setTimeout(() => { knopf.textContent = 'Alles kopieren'; }, 1600);
     });
+  }
+});
+
+/* Gegen den Zwischenspeicher von GitHub Pages und Safari: die Seite mit einer
+   frischen Kennung in der Adresse neu holen. Bewusst OHNE den HTTP-Speicher zu
+   leeren – dort liegen die Modelle, die sollen erhalten bleiben. */
+document.getElementById('neuladen').addEventListener('click', async function(){
+  this.textContent = 'Lädt neu';
+  try{
+    if(navigator.serviceWorker && navigator.serviceWorker.getRegistrations){
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister()));
+    }
+  }catch(e){}
+  try{
+    const u = new URL(location.href);
+    u.searchParams.set('v', Date.now().toString(36));
+    location.replace(u.toString());
+  }catch(e){
+    location.reload();
   }
 });
 
 document.getElementById('bildTeilen').addEventListener('click', function(){
-  leinwand.toBlob(function(b){
+  leinwand.toBlob(b => {
     if(!b) return;
     let datei = null;
-    try{ datei = new File([b], 'paddle-sonde.png', {type:'image/png'}); }catch(e){}
+    try{ datei = new File([b], 'paddle-analyse.png', {type:'image/png'}); }catch(e){}
     if(datei && navigator.canShare && navigator.canShare({files:[datei]}) && navigator.share){
-      navigator.share({files:[datei], title:'PaddleOCR-Sonde'});
+      navigator.share({files:[datei], title:'PaddleOCR-Analyse'});
       return;
     }
     const a = document.createElement('a');
     a.href = URL.createObjectURL(b);
-    a.download = 'paddle-sonde.png';
+    a.download = 'paddle-analyse.png';
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
   }, 'image/png');
 });
