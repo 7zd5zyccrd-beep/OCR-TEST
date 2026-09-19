@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   PaddleOCR-Test · Verteilerbeschreibung
-  v0.3 · 19.09.2026
+  v0.4 · 19.09.2026
 
   Etappe 2. Die Sonde v0.1 hat gezeigt, dass PaddleOCR im Browser läuft:
   auf dem iPhone mit WebGPU 1,5 s für das ganze Blatt, alle elf Stromkreis-
@@ -21,6 +21,23 @@
    4. Aufstiegsregel für die Nummern, Wortlisten für Bezeichnung und Ort.
       Fängt Fehllesungen wie "Obcrspanungschutz" ab.
    5. Modellwahl zum Vergleichen: tiny, small, lateinisch.
+
+  v0.4 (aus den beiden iPhone-Läufen):
+   6. Der Kopfschnitt fiel auf Buchstaben herein: "elektroDe witz" wurde über die
+      Buchstabenersetzung zu "1700172" und galt als Stromkreisnummer, worauf der
+      Schnitt ueber den Firmenkopf statt darunter fiel. Jetzt muss eine Nummer
+      ueberwiegend aus Ziffern bestehen und zwischen 1 und 60 liegen.
+   7. Die Schwelle steht auf 0,40 statt 0,65. Mit 0,65 fielen 13-15, 16-19, E-Herd
+      und die untere Zeile ganz heraus - eine fehlende Zeile ist schlimmer als eine
+      falsch gelesene, denn die faengt die Nachbearbeitung ab.
+   8. Stromkreisangaben behalten ihr Trennzeichen ("9 . 12" wurde zu "912"). Eine
+      einzelne unplausible Zahl wie "516" wird als unsicher gekennzeichnet statt
+      auf gut Glueck in 5/6 zerlegt.
+   9. Spaltenversatz fachlich geloest: hat eine Nummer keine Bezeichnung, steht
+      aber in der Ortsspalte ein Wort von der Bezeichnungsliste, wandert es
+      hinueber. Damit kommt der Ueberspannungsschutz zu 16-19.
+  10. Der Ergebnis-Zwischenspeicher ist abgeschaltet, sonst meldete ein zweiter
+      Lauf ueber dasselbe Bild 0,1 s statt der wahren Dauer.
 
   v0.3: Knopf "App neu laden" gegen den Zwischenspeicher von GitHub Pages und
   Safari – hängt eine frische Kennung an die Adresse und meldet einen etwaigen
@@ -135,7 +152,7 @@
 
   <header>
     <h1>PaddleOCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.3 · 19.09.2026</span>
+    <span class="ver">v0.4 · 19.09.2026</span>
   </header>
 
   <div class="karte">
@@ -153,8 +170,8 @@
         <label class="feld" for="schwelle">Sicherheitsschwelle</label>
         <select id="schwelle">
           <option value="0">alles behalten</option>
-          <option value="0.5">0,50</option>
-          <option value="0.65" selected>0,65 · verwirft den Firmenkopf</option>
+          <option value="0.4" selected>0,40 · Vorgabe</option>
+          <option value="0.65">0,65</option>
           <option value="0.8">0,80</option>
         </select>
       </div>
@@ -243,7 +260,7 @@ const MODELLE = {
   latin: {name:'v5 lateinisch',  konstante:'V5_LATIN_MOBILE_MODEL'}
 };
 
-const VERSION = 'v0.3 · 19.09.2026';
+const VERSION = 'v0.4 · 19.09.2026';
 
 /* ==================== Schrittliste ==================== */
 
@@ -571,6 +588,20 @@ function nurNummer(t){
   return sauber;
 }
 
+/* Eine echte Stromkreisnummer ist klein und besteht überwiegend aus Ziffern.
+   Ohne diese Prüfung wurde "elektroDe witz" über die Buchstabenersetzung zu
+   "1700172", galt als Nummer und legte den Kopfschnitt über den Firmenkopf. */
+function istKreisnummer(text){
+  const roh = (text||'').replace(/\s/g,'');
+  if(!roh) return false;
+  const ziffern = (roh.match(/[0-9]/g) || []).length;
+  if(ziffern / roh.length < 0.6) return false;
+  const z = zerlege(nurNummer(text));
+  if(!z) return false;
+  if(z.a < 1 || z.b > 60 || z.b < z.a) return false;
+  return true;
+}
+
 function zerlege(t){
   let m;
   if((m = /^(\d+)-(\d+)$/.exec(t)))  return {art:'-', a:+m[1], b:+m[2]};
@@ -670,14 +701,29 @@ function besteWahl(wort, liste){
 
 function textDeuten(roh, liste){
   const t = saeubern(roh);
-  const erg = {roh, text:'', geaendert:false, leer:false};
+  const erg = {roh, text:'', geaendert:false, leer:false, unklar:false};
   if(!t){ erg.leer = true; return erg; }
 
   const sk = /stromkre\S*/i.exec(t);
   if(sk){
-    const zahlen = nurZiffern(t.substring(sk.index + sk[0].length));
-    if(!zahlen) return {roh, text:'Stromkreis', geaendert:true, leer:false};
-    erg.text = 'Stromkreis ' + zahlen.replace(/-/g,' - ');
+    /* "9 . 12" verlor das Trennzeichen und wurde zu "912". Jetzt werden die
+       Zahlen einzeln geholt und der Trenner nach dem Original gesetzt:
+       Schrägstrich bleibt Schrägstrich (zwei einzelne Kreise), alles andere
+       wird zum Strich (ein Bereich). */
+    const rest = t.substring(sk.index + sk[0].length);
+    const zahlen = rest.match(/\d+/g) || [];
+    const trenner = rest.indexOf('/') >= 0 ? ' / ' : ' - ';
+    if(!zahlen.length) return {roh, text:'Stromkreis', geaendert:true, leer:false};
+    if(zahlen.length === 1){
+      const eine = parseInt(zahlen[0], 10);
+      /* Eine einzelne unplausible Zahl wie "516" ist in Wahrheit "5 / 6",
+         zusammengelesen. Raten wäre hier gefährlich, also kenntlich machen. */
+      erg.text = 'Stromkreis ' + zahlen[0];
+      erg.geaendert = (erg.text !== t);
+      erg.unklar = (eine > 60);
+      return erg;
+    }
+    erg.text = 'Stromkreis ' + zahlen[0] + trenner + zahlen[1];
     erg.geaendert = (erg.text !== t);
     return erg;
   }
@@ -761,7 +807,7 @@ async function lauf(){
   await new Promise(r => setTimeout(r, 30));
   let erg;
   try{
-    erg = await dienst.recognize(arbeit);
+    erg = await dienst.recognize(arbeit, { noCache: true });
     setze('lesen','gut','', jetzt()-t0);
   }catch(err){
     setze('lesen','schlecht',(err && err.message ? err.message : String(err)), jetzt()-t0);
@@ -829,7 +875,7 @@ function verarbeite(erg, arbeit, winkel, leseDauer){
       if(!w.behalten) return;
       const mx = (w.bbox.x0 + w.bbox.x1)/2;
       if(mx > drittel) return;
-      if(!zerlege(nurNummer(w.text))) return;
+      if(!istKreisnummer(w.text)) return;
       if(w.bbox.y0 < oben) oben = w.bbox.y0;
     });
     if(oben !== Infinity){
@@ -989,17 +1035,43 @@ function baueTabelle(teile, nach){
     if(n.b !== null && n.b !== undefined) erwartet = n.b + 1;
     tr.appendChild(zelle(n.text, z.text, n.geaendert, n.unklar, false, 'nr'));
 
-    const paare = [[naechste(bez, z.mitte, benutztB), BEZEICHNUNGEN],
-                   [naechste(ort, z.mitte, benutztO), ORTE.concat(BEZEICHNUNGEN)]];
-    const felder = [n.text];
-    paare.forEach(p => {
-      const tref = p[0];
-      if(!tref){ tr.appendChild(zelle('—','',false,false,true,'')); felder.push('—'); return; }
-      const d = nach ? textDeuten(tref.zeile.text, p[1])
-                     : {text: saeubern(tref.zeile.text), roh:tref.zeile.text, geaendert:false, leer:false};
-      tr.appendChild(zelle(d.leer ? '—' : d.text, tref.zeile.text, d.geaendert, false, d.leer || tref.doppelt, ''));
-      felder.push(d.leer ? '—' : d.text);
-    });
+    const bezRef = naechste(bez, z.mitte, benutztB);
+    const ortRef = naechste(ort, z.mitte, benutztO);
+    const leerD = () => ({text:'—', roh:'', geaendert:false, leer:true, unklar:false});
+
+    let bezD = bezRef
+      ? (nach ? textDeuten(bezRef.zeile.text, BEZEICHNUNGEN)
+              : {text:saeubern(bezRef.zeile.text), roh:bezRef.zeile.text, geaendert:false, leer:false, unklar:false})
+      : leerD();
+    let ortD = ortRef
+      ? (nach ? textDeuten(ortRef.zeile.text, ORTE)
+              : {text:saeubern(ortRef.zeile.text), roh:ortRef.zeile.text, geaendert:false, leer:false, unklar:false})
+      : leerD();
+
+    /* Der Spaltenversatz, an dem wir seit dem ersten Foto hängen: auf manchen
+       Schildern sitzt die Bezeichnung geometrisch in der Ortsspalte. Hat eine
+       Nummer keine Bezeichnung, steht aber rechts ein Wort, das auf der
+       Bezeichnungsliste steht, wandert es hinüber. Fachlich statt geometrisch. */
+    let verschoben = false;
+    if(nach && bezD.leer && ortRef && !ortD.text.startsWith('Stromkreis')){
+      const alsBez = textDeuten(ortRef.zeile.text, BEZEICHNUNGEN);
+      if(!alsBez.leer){
+        bezD = alsBez;
+        bezD.geaendert = true;
+        ortD = leerD();
+        verschoben = true;
+      }
+    }
+
+    const roh1 = bezRef && !verschoben ? bezRef.zeile.text : (verschoben ? ortRef.zeile.text : '');
+    tr.appendChild(zelle(bezD.leer ? '—' : bezD.text, roh1,
+                         bezD.geaendert, bezD.unklar,
+                         bezD.leer || (bezRef && bezRef.doppelt), ''));
+    tr.appendChild(zelle(ortD.leer ? '—' : ortD.text, verschoben ? '' : (ortRef ? ortRef.zeile.text : ''),
+                         ortD.geaendert, ortD.unklar,
+                         ortD.leer || (ortRef && ortRef.doppelt && !verschoben), ''));
+    const felder = [n.text, bezD.leer ? '—' : bezD.text, ortD.leer ? '—' : ortD.text];
+    if(verschoben) felder.push('(aus der Ortsspalte geholt)');
     koerper.appendChild(tr);
     text += felder.join(' | ') + '\n';
   });
