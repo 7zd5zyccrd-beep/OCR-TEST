@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   OCR-Test · Verteilerbeschreibung
-  v0.4 · 19.09.2026
+  v0.5 · 19.09.2026
 
   Eigenständige Testseite, KEINE Änderung am BDS E-Assistent.
 
@@ -35,6 +35,11 @@
   14. Ein Strich oder Schrägstrich ohne Ziffer daneben wird verworfen (der mitgelesene
       Tabellenstrich machte aus "42" ein unlesbares "42/").
   15. Die Trenner von Hand bleiben als Rückfallebene, werden aber nicht mehr gebraucht.
+
+  v0.5:
+  16. Das Analysebild lässt sich kopieren und teilen.
+  17. Der kopierte Rohtext trägt die vier Kennzahlen und die benutzten Einstellungen
+      am Ende, damit ein Lauf ohne Nachfragen einzuordnen ist.
 
   Ablage: als zweite Datei neben index.html ins GitHub-Repository,
   erreichbar unter <benutzername>.github.io/<projekt>/ocr-test.html
@@ -144,7 +149,7 @@
 
   <header>
     <h1>OCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.4 · 19.09.2026</span>
+    <span class="ver">v0.5 · 19.09.2026</span>
   </header>
 
   <div class="karte">
@@ -229,6 +234,10 @@
     <div class="tafel" id="tBild">
       <canvas id="kaesten" style="width:100%;height:auto;border-radius:12px"></canvas>
       <p class="hinweis">So hat die Engine das Bild nach der Aufbereitung gesehen. Zum Vergrößern mit zwei Fingern aufziehen.</p>
+      <div class="knopfreihe" style="margin-top:12px">
+        <button class="still" id="bildKopieren">Bild kopieren</button>
+        <button class="still" id="bildTeilen">Bild teilen</button>
+      </div>
     </div>
 
     <div class="tafel" id="tRoh">
@@ -259,8 +268,9 @@
   var quelle = null, arbeit = null, auswahl = null;
   var trenner = [0.16, 0.56];
   var worker = null, workerBereit = false, laeuft = false;
-  var letzteRohtexte = '';
+  var letzteRohtexte = '', letzteKennzahlen = '';
   var gefundeneTrenner = null, autoFehl = false;
+  var VERSION = 'v0.5 · 19.09.2026';
 
   function $(id){ return document.getElementById(id); }
 
@@ -1176,10 +1186,30 @@
 
     var summe = 0;
     alle.forEach(function(w){ summe += (w.confidence||0); });
+    var sicher = alle.length ? Math.round(summe/alle.length) + ' %' : '–';
     $('zDauer').textContent   = dauer.toFixed(1);
     $('zWoerter').textContent = alle.length;
-    $('zSicher').textContent  = alle.length ? Math.round(summe/alle.length) + ' %' : '–';
+    $('zSicher').textContent  = sicher;
     $('zWinkel').textContent  = winkel ? winkel.toFixed(2) + '°' : '0°';
+
+    /* Dieselben Angaben in Textform, damit sie beim Kopieren mitgehen. */
+    var einst = [];
+    einst.push($('breite').value + ' px');
+    einst.push($('modus').options[$('modus').selectedIndex].text);
+    einst.push($('optEntzerren').checked ? 'entzerrt' : 'nicht entzerrt');
+    einst.push($('optLinien').checked ? 'Linien getilgt' : 'Linien stehen gelassen');
+    if(!einzeln) einst.push('Spalten nicht getrennt');
+    else if(autoFehl) einst.push('Spalten automatisch misslungen, Trenner von Hand');
+    else if($('optAuto').checked) einst.push('Spalten automatisch');
+    else einst.push('Trenner von Hand');
+    if(gefundeneTrenner) einst.push('Grenzen bei ' + Math.round(gefundeneTrenner[0]) + ' und ' + Math.round(gefundeneTrenner[1]) + ' von ' + arbeit.width);
+    einst.push($('optNach').checked ? 'nachbearbeitet' : 'ohne Nachbearbeitung');
+
+    letzteKennzahlen =
+      'Kennzahlen: ' + dauer.toFixed(1) + ' s · ' + alle.length + ' Wörter · ' +
+      sicher + ' mittlere Sicherheit · ' + (winkel ? winkel.toFixed(2) : '0') + '° Schräglage\n' +
+      'Einstellungen: ' + einst.join(', ') + '\n' +
+      'Fassung: ' + VERSION + '\n';
 
     var ziel = $('tabelle');
     ziel.innerHTML = '';
@@ -1236,6 +1266,13 @@
       rt.appendChild(h); rt.appendChild(pre);
       letzteRohtexte += t.name + ':\n' + txt + '\n\n';
     });
+
+    var kz = document.createElement('pre');
+    kz.className = 'roh';
+    kz.textContent = letzteKennzahlen.trim();
+    var kzh = document.createElement('h3');
+    kzh.className = 'klein'; kzh.textContent = 'Kennzahlen';
+    rt.appendChild(kzh); rt.appendChild(kz);
 
     $('ergebnis').style.display = 'block';
     $('ergebnis').scrollIntoView({behavior:'smooth', block:'start'});
@@ -1371,13 +1408,72 @@
     });
   });
 
+  function kurzRueckmeldung(knopf, text){
+    var alt = knopf.dataset.alt || knopf.textContent;
+    knopf.dataset.alt = alt;
+    knopf.textContent = text;
+    setTimeout(function(){ knopf.textContent = alt; }, 1600);
+  }
+
   $('kopieren').addEventListener('click', function(){
-    if(navigator.clipboard){
-      navigator.clipboard.writeText(letzteRohtexte).then(function(){
-        $('kopieren').textContent = 'Kopiert';
-        setTimeout(function(){ $('kopieren').textContent = 'Rohtext kopieren'; }, 1500);
+    var knopf = this;
+    var text = letzteRohtexte + letzteKennzahlen;
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).then(function(){
+        kurzRueckmeldung(knopf, 'Kopiert');
+      })['catch'](function(){
+        kurzRueckmeldung(knopf, 'Kopieren ging nicht');
       });
+    } else {
+      kurzRueckmeldung(knopf, 'Kopieren ging nicht');
     }
+  });
+
+  function bildBlob(){
+    return new Promise(function(res, rej){
+      var c = $('kaesten');
+      if(!c.width){ rej(new Error('kein Bild')); return; }
+      if(c.toBlob) c.toBlob(function(b){ b ? res(b) : rej(new Error('leer')); }, 'image/png');
+      else rej(new Error('toBlob fehlt'));
+    });
+  }
+
+  $('bildKopieren').addEventListener('click', function(){
+    var knopf = this;
+    /* Safari verlangt, dass das ClipboardItem NOCH IM Fingertipp entsteht und
+       das Versprechen auf den Blob selbst übergeben wird – nicht der fertige Blob. */
+    if(window.ClipboardItem && navigator.clipboard && navigator.clipboard.write){
+      try{
+        var stueck = new ClipboardItem({'image/png': bildBlob()});
+        navigator.clipboard.write([stueck]).then(function(){
+          kurzRueckmeldung(knopf, 'Kopiert');
+        })['catch'](function(){
+          kurzRueckmeldung(knopf, 'Ging nicht, nimm Teilen');
+        });
+        return;
+      }catch(e){ /* weiter unten */ }
+    }
+    kurzRueckmeldung(knopf, 'Ging nicht, nimm Teilen');
+  });
+
+  $('bildTeilen').addEventListener('click', function(){
+    var knopf = this;
+    bildBlob().then(function(b){
+      var datei = null;
+      try{ datei = new File([b], 'ocr-analyse.png', {type:'image/png'}); }catch(e){}
+      if(datei && navigator.canShare && navigator.canShare({files:[datei]}) && navigator.share){
+        return navigator.share({files:[datei], title:'OCR-Analyse'});
+      }
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(b);
+      a.download = 'ocr-analyse.png';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+    })['catch'](function(){
+      kurzRueckmeldung(knopf, 'Ging nicht');
+    });
   });
 
   function zeigeFehler(t){
