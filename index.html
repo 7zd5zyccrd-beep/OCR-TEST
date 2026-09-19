@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   PaddleOCR-Test · Verteilerbeschreibung
-  v0.5 · 19.09.2026
+  v0.6 · 19.09.2026
 
   Etappe 2. Die Sonde v0.1 hat gezeigt, dass PaddleOCR im Browser läuft:
   auf dem iPhone mit WebGPU 1,5 s für das ganze Blatt, alle elf Stromkreis-
@@ -21,6 +21,13 @@
    4. Aufstiegsregel für die Nummern, Wortlisten für Bezeichnung und Ort.
       Fängt Fehllesungen wie "Obcrspanungschutz" ab.
    5. Modellwahl zum Vergleichen: tiny, small, lateinisch.
+
+  v0.6: Die Zuordnung sucht zusaetzlich den Grundversatz zwischen zwei Spalten.
+  Auf Jeans Schild laeuft die Ortsspalte nach unten gegen die Nummernspalte; der
+  absolute Hoehenunterschied wurde dadurch so gross, dass die Rechnung lieber ein
+  "Kueche" uebersprang, als es zu paaren - danach war alles um eine Zeile
+  verschoben und 20/21 fiel heraus. Ein gleichmaessiger Versatz ist kein Fehler,
+  sondern die Eigenart des Schildes; bestraft wird nur, was aus der Reihe faellt.
 
   v0.5: Die Zuordnung Nummer <-> Spalteneintrag laeuft nicht mehr ueber den
   naechstgelegenen Nachbarn, sondern ueber eine Zuordnung, die die Reihenfolge
@@ -157,7 +164,7 @@
 
   <header>
     <h1>PaddleOCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.5 · 19.09.2026</span>
+    <span class="ver">v0.6 · 19.09.2026</span>
   </header>
 
   <div class="karte">
@@ -265,7 +272,7 @@ const MODELLE = {
   latin: {name:'v5 lateinisch',  konstante:'V5_LATIN_MOBILE_MODEL'}
 };
 
-const VERSION = 'v0.5 · 19.09.2026';
+const VERSION = 'v0.6 · 19.09.2026';
 
 /* ==================== Schrittliste ==================== */
 
@@ -1009,10 +1016,10 @@ function verarbeite(erg, arbeit, winkel, leseDauer){
    mit der kleinsten Summe an Höhensprüngen; eine Lücke kostet einen festen
    Aufschlag. Damit landet die fehlende Bezeichnung bei 16-19 dort, wo sie die
    wenigsten Sprünge verursacht, statt alles Folgende zu verschieben. */
-function zuordnungFinden(nrZeilen, spalteZeilen, hoehe){
+function einDurchgang(nrZeilen, spalteZeilen, hoehe, versatz){
   const N = nrZeilen.length, M = spalteZeilen.length;
   const LUECKE = hoehe * 1.2;
-  const MAX = hoehe * 3;
+  const MAX = hoehe * 2.2;
   const f = [], weg = [];
   for(let i=0;i<=N;i++){
     f.push(new Array(M+1).fill(Infinity));
@@ -1030,7 +1037,7 @@ function zuordnungFinden(nrZeilen, spalteZeilen, hoehe){
         f[i][j+1] = hier + LUECKE; weg[i][j+1] = ['eintrag', i, j];
       }
       if(i < N && j < M){
-        const d = Math.abs(nrZeilen[i].mitte - spalteZeilen[j].mitte);
+        const d = Math.abs(nrZeilen[i].mitte - (spalteZeilen[j].mitte - versatz));
         if(d <= MAX && hier + d < f[i+1][j+1]){
           f[i+1][j+1] = hier + d; weg[i+1][j+1] = ['paar', i, j];
         }
@@ -1047,7 +1054,21 @@ function zuordnungFinden(nrZeilen, spalteZeilen, hoehe){
     else if(s[0] === 'zeile'){ i--; }
     else { j--; }
   }
-  return {zu, frei};
+  return {zu, frei, kosten: f[N][M]};
+}
+
+/* Der Grundversatz zwischen zwei Spalten ist kein Fehler, sondern die Eigenart
+   des Schildes: auf Jeans Blatt läuft die Ortsspalte gegen die Nummernspalte.
+   Bestraft gehört nur, was aus der Reihe fällt. Deshalb wird der Versatz
+   gesucht, bei dem die Zuordnung insgesamt am wenigsten kostet. */
+function zuordnungFinden(nrZeilen, spalteZeilen, hoehe){
+  let best = null;
+  for(let v = -1.75; v <= 1.7501; v += 0.25){
+    const erg = einDurchgang(nrZeilen, spalteZeilen, hoehe, v*hoehe);
+    if(!best || erg.kosten < best.kosten){ best = erg; best.versatz = v; }
+  }
+  return best || {zu:new Array(nrZeilen.length).fill(-1),
+                  frei:new Array(spalteZeilen.length).fill(true), kosten:0, versatz:0};
 }
 
 function baueTabelle(teile, nach){
