@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<!--
+  OCR-Test · Verteilerbeschreibung
+  v0.1 · 19.09.2026
+
+  Eigenständige Testseite, KEINE Änderung am BDS E-Assistent.
+  Zweck: herausfinden, was Tesseract.js aus einem Foto einer gedruckten
+  Verteilerbeschreibung wirklich herausliest, bevor irgendetwas in die App gebaut wird.
+
+  Ablage: als zweite Datei neben index.html ins GitHub-Repository legen,
+  erreichbar unter <benutzername>.github.io/<projekt>/ocr-test.html
+  Die Seite braucht https, sonst gibt Safari die Kamera nicht frei.
+
+  Engine: Tesseract.js 5 von jsDelivr. Sprachdaten werden beim ersten Lauf
+  geladen und danach im Gerät behalten (IndexedDB), spätere Läufe gehen ohne Netz.
+-->
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>OCR-Test · Verteilerbeschreibung</title>
+<style>
+  :root{
+    --gruen:#A0D241;
+    --gruen-tief:#7CA82C;
+    --dunkel:#1A1F16;
+    --grund:#FBFBF7;
+    --karte:#FFFFFF;
+    --linie:#E2E4DC;
+    --grau:#6B7065;
+    --rot:#C0392B;
+    --bernstein:#D98E0B;
+    box-sizing:border-box;
+    padding-top:env(safe-area-inset-top,0px);
+    padding-bottom:env(safe-area-inset-bottom,0px);
+  }
+  *,*::before,*::after{box-sizing:inherit}
+  body{
+    margin:0;
+    font-family:-apple-system,system-ui,"Segoe UI",sans-serif;
+    font-size:17px;
+    line-height:1.45;
+    color:var(--dunkel);
+    background:var(--grund);
+    -webkit-text-size-adjust:100%;
+  }
+  .huelle{max-width:900px;margin:0 auto;padding:18px 16px 60px}
+
+  header{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:18px}
+  header h1{font-size:21px;margin:0;font-weight:640;letter-spacing:-.01em}
+  header .ver{font-size:13px;color:var(--grau)}
+
+  .karte{
+    background:var(--karte);
+    border:1px solid var(--linie);
+    border-radius:16px;
+    padding:16px;
+    margin-bottom:14px;
+  }
+  .karte h2{font-size:15px;margin:0 0 12px;font-weight:620;color:var(--grau)}
+
+  button,.knopf{
+    font:inherit;
+    min-height:48px;
+    padding:0 18px;
+    border-radius:14px;
+    border:1px solid var(--gruen-tief);
+    background:var(--gruen);
+    color:var(--dunkel);
+    font-weight:600;
+    cursor:pointer;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+  }
+  button.still,.knopf.still{background:#fff;border-color:var(--linie);color:var(--dunkel);font-weight:500}
+  button:disabled{opacity:.45;cursor:default}
+  button:focus-visible,select:focus-visible,.knopf:focus-visible{outline:3px solid var(--gruen-tief);outline-offset:2px}
+  .knopfreihe{display:flex;gap:10px;flex-wrap:wrap}
+  .breit{width:100%}
+
+  .felder{display:grid;gap:12px}
+  @media (min-width:560px){.felder{grid-template-columns:1fr 1fr}}
+  label.feld{display:block;font-size:13px;color:var(--grau);margin-bottom:5px}
+  select{
+    font:inherit;width:100%;min-height:48px;padding:0 12px;
+    border:1px solid var(--linie);border-radius:14px;background:#fff;color:var(--dunkel);
+  }
+
+  #bildbereich{display:none}
+  .buehne{position:relative;touch-action:none;user-select:none;-webkit-user-select:none;line-height:0}
+  .buehne canvas{width:100%;height:auto;border-radius:12px;display:block;background:#EFEFEA}
+  #rahmen{
+    position:absolute;border:2px solid var(--gruen-tief);
+    background:rgba(160,210,65,.22);border-radius:4px;pointer-events:none;display:none;
+  }
+  .hinweis{font-size:14px;color:var(--grau);margin:10px 0 0}
+
+  #fortschritt{display:none;margin-top:14px}
+  .balken{height:8px;background:#EDEFE8;border-radius:99px;overflow:hidden}
+  .balken i{display:block;height:100%;width:0;background:var(--gruen-tief);transition:width .2s}
+  #lauftext{font-size:14px;color:var(--grau);margin-top:8px}
+
+  #ergebnis{display:none}
+  .reiter{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+  .reiter button{min-height:42px;padding:0 14px;font-size:15px;background:#fff;border-color:var(--linie);font-weight:500}
+  .reiter button[aria-selected="true"]{background:var(--gruen);border-color:var(--gruen-tief);font-weight:620}
+  .tafel{display:none}
+  .tafel.an{display:block}
+
+  .zahlen{display:flex;gap:18px;flex-wrap:wrap;font-size:14px;color:var(--grau);margin-bottom:14px}
+  .zahlen b{display:block;font-size:19px;color:var(--dunkel);font-weight:640}
+
+  .zeile{padding:7px 0;border-bottom:1px solid var(--linie);display:flex;flex-wrap:wrap;gap:6px;align-items:baseline}
+  .zeile:last-child{border-bottom:0}
+  .zeile .nr{font-size:12px;color:var(--grau);min-width:26px}
+  .wort{padding:1px 6px;border-radius:6px;background:#F1F4EB}
+  .wort.mittel{background:#FCEFD2}
+  .wort.schwach{background:#F8DDDA;color:var(--rot)}
+  .luecke{opacity:.35}
+
+  pre#roh{
+    white-space:pre-wrap;word-break:break-word;
+    font-family:ui-monospace,Menlo,monospace;font-size:14px;line-height:1.5;
+    background:#F6F7F3;border:1px solid var(--linie);border-radius:12px;padding:12px;margin:0 0 12px;
+  }
+  .legende{font-size:13px;color:var(--grau);margin-top:12px}
+  .legende span{display:inline-block;width:11px;height:11px;border-radius:3px;vertical-align:-1px;margin-right:4px}
+
+  details{border-top:1px solid var(--linie);padding-top:14px;margin-top:6px}
+  summary{font-size:15px;font-weight:600;cursor:pointer}
+  details p,details li{font-size:15px;color:var(--grau)}
+  details ul{padding-left:20px}
+
+  .fehler{background:#F8DDDA;border:1px solid #E8B6B0;color:#8B2B20;border-radius:12px;padding:12px;font-size:15px;margin-top:12px;display:none}
+  input[type=file]{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+</style>
+</head>
+<body>
+<div class="huelle">
+
+  <header>
+    <h1>OCR-Test · Verteilerbeschreibung</h1>
+    <span class="ver">v0.1 · 19.09.2026</span>
+  </header>
+
+  <div class="karte">
+    <h2>Foto</h2>
+    <div class="knopfreihe">
+      <label class="knopf" for="datei">Foto aufnehmen oder wählen</label>
+      <input type="file" id="datei" accept="image/*">
+    </div>
+    <p class="hinweis" id="dateiinfo">Am besten nah heran und möglichst gerade von vorn, damit die Abdeckung nicht spiegelt.</p>
+  </div>
+
+  <div class="karte" id="bildbereich">
+    <h2>Ausschnitt</h2>
+    <div class="buehne" id="buehne">
+      <canvas id="vorschau"></canvas>
+      <div id="rahmen"></div>
+    </div>
+    <p class="hinweis">Ziehe mit dem Finger ein Rechteck über die Beschriftung. Ohne Auswahl wird das ganze Bild gelesen.</p>
+    <div class="knopfreihe" style="margin-top:12px">
+      <button class="still" id="ganz">Ganzes Bild</button>
+      <button class="still" id="drehen">Drehen</button>
+    </div>
+  </div>
+
+  <div class="karte" id="optionen" style="display:none">
+    <h2>Einstellungen</h2>
+    <div class="felder">
+      <div>
+        <label class="feld" for="breite">Breite für die Erkennung</label>
+        <select id="breite">
+          <option value="1200">1200 px, schnell</option>
+          <option value="2000" selected>2000 px</option>
+          <option value="3000">3000 px, langsam</option>
+        </select>
+      </div>
+      <div>
+        <label class="feld" for="modus">Bildaufbereitung</label>
+        <select id="modus">
+          <option value="orig">Original</option>
+          <option value="grau" selected>Graustufen, Kontrast angehoben</option>
+          <option value="sw">Schwarzweiß, harter Schwellwert</option>
+        </select>
+      </div>
+      <div>
+        <label class="feld" for="psm">Textaufbau</label>
+        <select id="psm">
+          <option value="6" selected>Ein Block mit Zeilen</option>
+          <option value="4">Spalten unterschiedlicher Größe</option>
+          <option value="3">Automatisch</option>
+          <option value="11">Verstreute Textstücke</option>
+        </select>
+      </div>
+      <div>
+        <label class="feld" for="sprache">Sprache</label>
+        <select id="sprache">
+          <option value="deu" selected>Deutsch</option>
+          <option value="deu+eng">Deutsch und Englisch</option>
+          <option value="eng">Englisch</option>
+        </select>
+      </div>
+    </div>
+    <div class="knopfreihe" style="margin-top:14px">
+      <button id="start" class="breit">Text erkennen</button>
+    </div>
+    <div id="fortschritt">
+      <div class="balken"><i id="balken"></i></div>
+      <p id="lauftext"></p>
+    </div>
+    <div class="fehler" id="fehler"></div>
+  </div>
+
+  <div class="karte" id="ergebnis">
+    <h2>Ergebnis</h2>
+    <div class="zahlen">
+      <div><b id="zDauer">–</b>Sekunden</div>
+      <div><b id="zWoerter">–</b>Wörter</div>
+      <div><b id="zSicher">–</b>mittlere Sicherheit</div>
+      <div><b id="zSchwach">–</b>unter 75 %</div>
+    </div>
+    <div class="reiter" role="tablist">
+      <button role="tab" aria-selected="true" data-tafel="tZeilen">Zeilen</button>
+      <button role="tab" aria-selected="false" data-tafel="tBild">Bild mit Kästen</button>
+      <button role="tab" aria-selected="false" data-tafel="tRoh">Rohtext</button>
+    </div>
+
+    <div class="tafel an" id="tZeilen">
+      <div id="zeilen"></div>
+      <p class="legende">
+        <span style="background:#F1F4EB"></span>sicher
+        <span style="background:#FCEFD2;margin-left:12px"></span>75 bis 89 %
+        <span style="background:#F8DDDA;margin-left:12px"></span>unter 75 %
+      </p>
+    </div>
+
+    <div class="tafel" id="tBild">
+      <canvas id="kaesten" style="width:100%;height:auto;border-radius:12px"></canvas>
+      <p class="hinweis">So hat die Engine das Bild gesehen. Zum Vergrößern mit zwei Fingern aufziehen.</p>
+    </div>
+
+    <div class="tafel" id="tRoh">
+      <pre id="roh"></pre>
+      <button class="still" id="kopieren">Rohtext kopieren</button>
+    </div>
+  </div>
+
+  <details>
+    <summary>Wenn das Ergebnis schlecht ist</summary>
+    <ul>
+      <li>Ausschnitt enger ziehen, nur die Beschriftung, kein Verteilerrahmen.</li>
+      <li>Auf 3000 px gehen, das hilft bei kleiner Schrift am meisten.</li>
+      <li>Spiegelt die Abdeckung, ein zweites Foto schräg von der Seite versuchen oder die Abdeckung abnehmen.</li>
+      <li>Bei blassem Druck Schwarzweiß probieren, bei grauem Untergrund Graustufen.</li>
+      <li>Stehen die Spalten falsch zusammen, den Textaufbau auf Spalten oder Automatisch stellen.</li>
+    </ul>
+    <p>Der erste Lauf lädt Engine und Sprachdaten nach, das braucht Netz und etwas Geduld. Danach bleiben sie im Gerät, auch ohne Empfang.</p>
+  </details>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script>
+(function(){
+  'use strict';
+
+  var quelle = null;        // Canvas mit dem vollständigen Foto
+  var arbeit = null;        // Canvas, der tatsächlich gelesen wurde
+  var auswahl = null;       // Rechteck in Quellkoordinaten
+  var worker = null;
+  var workerSprache = '';
+  var laeuft = false;
+
+  var $ = function(id){ return document.getElementById(id); };
+
+  /* ---------- Foto laden ---------- */
+
+  $('datei').addEventListener('change', function(e){
+    var datei = e.target.files && e.target.files[0];
+    if(!datei) return;
+    zeigeFehler('');
+    ladeBild(datei).then(function(){
+      auswahl = null;
+      $('bildbereich').style.display = 'block';
+      $('optionen').style.display = 'block';
+      $('ergebnis').style.display = 'none';
+      $('dateiinfo').textContent = quelle.width + ' × ' + quelle.height + ' Bildpunkte, ' + Math.round(datei.size/1024) + ' KB';
+      zeichneVorschau();
+    }).catch(function(){
+      zeigeFehler('Das Bild ließ sich nicht öffnen. Versuche ein anderes Format als HEIC, etwa einen Bildschirmfoto-Ausschnitt.');
+    });
+  });
+
+  function ladeBild(datei){
+    return neuesBitmap(datei).then(function(bm){
+      var c = document.createElement('canvas');
+      c.width = bm.width; c.height = bm.height;
+      c.getContext('2d').drawImage(bm, 0, 0);
+      if(bm.close) bm.close();
+      quelle = c;
+    });
+  }
+
+  function neuesBitmap(datei){
+    if(window.createImageBitmap){
+      return createImageBitmap(datei, {imageOrientation:'from-image'}).catch(function(){ return ueberImg(datei); });
+    }
+    return ueberImg(datei);
+  }
+
+  function ueberImg(datei){
+    return new Promise(function(res, rej){
+      var img = new Image();
+      img.onload = function(){ res(img); };
+      img.onerror = rej;
+      img.src = URL.createObjectURL(datei);
+    });
+  }
+
+  /* ---------- Vorschau und Auswahl ---------- */
+
+  function zeichneVorschau(){
+    var c = $('vorschau');
+    var breite = $('buehne').clientWidth || 320;
+    var faktor = breite / quelle.width;
+    c.width = Math.round(quelle.width * faktor);
+    c.height = Math.round(quelle.height * faktor);
+    c.getContext('2d').drawImage(quelle, 0, 0, c.width, c.height);
+    zeichneRahmen();
+  }
+
+  function zeichneRahmen(){
+    var r = $('rahmen');
+    if(!auswahl){ r.style.display = 'none'; return; }
+    var c = $('vorschau');
+    var f = c.clientWidth / quelle.width;
+    r.style.display = 'block';
+    r.style.left   = (auswahl.x * f) + 'px';
+    r.style.top    = (auswahl.y * f) + 'px';
+    r.style.width  = (auswahl.w * f) + 'px';
+    r.style.height = (auswahl.h * f) + 'px';
+  }
+
+  var zieht = false, startX = 0, startY = 0;
+
+  $('buehne').addEventListener('pointerdown', function(e){
+    if(!quelle) return;
+    var b = $('vorschau').getBoundingClientRect();
+    zieht = true;
+    startX = e.clientX - b.left;
+    startY = e.clientY - b.top;
+    $('buehne').setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+
+  $('buehne').addEventListener('pointermove', function(e){
+    if(!zieht) return;
+    var b = $('vorschau').getBoundingClientRect();
+    var x = Math.max(0, Math.min(b.width,  e.clientX - b.left));
+    var y = Math.max(0, Math.min(b.height, e.clientY - b.top));
+    var f = quelle.width / b.width;
+    auswahl = {
+      x: Math.round(Math.min(startX, x) * f),
+      y: Math.round(Math.min(startY, y) * f),
+      w: Math.round(Math.abs(x - startX) * f),
+      h: Math.round(Math.abs(y - startY) * f)
+    };
+    zeichneRahmen();
+    e.preventDefault();
+  });
+
+  function zugEnde(){
+    if(!zieht) return;
+    zieht = false;
+    if(auswahl && (auswahl.w < 30 || auswahl.h < 20)){ auswahl = null; zeichneRahmen(); }
+  }
+  $('buehne').addEventListener('pointerup', zugEnde);
+  $('buehne').addEventListener('pointercancel', zugEnde);
+
+  $('ganz').addEventListener('click', function(){ auswahl = null; zeichneRahmen(); });
+
+  $('drehen').addEventListener('click', function(){
+    if(!quelle) return;
+    var c = document.createElement('canvas');
+    c.width = quelle.height; c.height = quelle.width;
+    var x = c.getContext('2d');
+    x.translate(c.width/2, c.height/2);
+    x.rotate(Math.PI/2);
+    x.drawImage(quelle, -quelle.width/2, -quelle.height/2);
+    quelle = c;
+    auswahl = null;
+    zeichneVorschau();
+  });
+
+  window.addEventListener('resize', function(){ if(quelle) zeichneVorschau(); });
+
+  /* ---------- Bildaufbereitung ---------- */
+
+  function aufbereiten(canvas, modus){
+    if(modus === 'orig') return;
+    var ctx = canvas.getContext('2d');
+    var bild = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    var d = bild.data, i, g;
+    var hist = new Array(256); for(i=0;i<256;i++) hist[i] = 0;
+
+    for(i=0; i<d.length; i+=4){
+      g = (d[i]*0.299 + d[i+1]*0.587 + d[i+2]*0.114) | 0;
+      d[i] = d[i+1] = d[i+2] = g;
+      hist[g]++;
+    }
+
+    var gesamt = d.length / 4;
+
+    if(modus === 'grau'){
+      // Kontrast über die 2-%- und 98-%-Grenze aufziehen
+      var zaehl = 0, unten = 0, oben = 255, ziel = gesamt * 0.02;
+      for(i=0;i<256;i++){ zaehl += hist[i]; if(zaehl >= ziel){ unten = i; break; } }
+      zaehl = 0; ziel = gesamt * 0.02;
+      for(i=255;i>=0;i--){ zaehl += hist[i]; if(zaehl >= ziel){ oben = i; break; } }
+      var spanne = Math.max(1, oben - unten);
+      for(i=0; i<d.length; i+=4){
+        g = ((d[i] - unten) * 255 / spanne) | 0;
+        g = g < 0 ? 0 : (g > 255 ? 255 : g);
+        d[i] = d[i+1] = d[i+2] = g;
+      }
+    } else if(modus === 'sw'){
+      var s = otsu(hist, gesamt);
+      for(i=0; i<d.length; i+=4){
+        g = d[i] > s ? 255 : 0;
+        d[i] = d[i+1] = d[i+2] = g;
+      }
+    }
+    ctx.putImageData(bild, 0, 0);
+  }
+
+  function otsu(hist, gesamt){
+    var summe = 0, i;
+    for(i=0;i<256;i++) summe += i * hist[i];
+    var summeB = 0, wB = 0, wF = 0, max = 0, schwelle = 128, mB, mF, zwischen;
+    for(i=0;i<256;i++){
+      wB += hist[i];
+      if(wB === 0) continue;
+      wF = gesamt - wB;
+      if(wF === 0) break;
+      summeB += i * hist[i];
+      mB = summeB / wB;
+      mF = (summe - summeB) / wF;
+      zwischen = wB * wF * (mB - mF) * (mB - mF);
+      if(zwischen > max){ max = zwischen; schwelle = i; }
+    }
+    return schwelle;
+  }
+
+  /* ---------- Erkennung ---------- */
+
+  var texte = {
+    'loading tesseract core':'Engine wird geladen',
+    'initializing tesseract':'Engine startet',
+    'loading language traineddata':'Sprachdaten werden geladen',
+    'initializing api':'Wird vorbereitet',
+    'recognizing text':'Text wird gelesen'
+  };
+
+  function melde(m){
+    if(!m || !m.status) return;
+    var t = texte[m.status] || m.status;
+    $('lauftext').textContent = t;
+    $('balken').style.width = Math.round((m.progress || 0) * 100) + '%';
+  }
+
+  function holeWorker(sprache){
+    if(worker && workerSprache === sprache) return Promise.resolve(worker);
+    var alt = worker ? worker.terminate() : Promise.resolve();
+    return alt.then(function(){
+      return Tesseract.createWorker(sprache, 1, { logger: melde });
+    }).then(function(w){
+      worker = w; workerSprache = sprache;
+      return w;
+    });
+  }
+
+  $('start').addEventListener('click', function(){
+    if(laeuft || !quelle) return;
+    if(typeof Tesseract === 'undefined'){
+      zeigeFehler('Die Erkennungs-Engine wurde nicht geladen. Prüfe die Internetverbindung und lade die Seite neu.');
+      return;
+    }
+    laeuft = true;
+    zeigeFehler('');
+    $('start').disabled = true;
+    $('fortschritt').style.display = 'block';
+    $('balken').style.width = '0%';
+    $('lauftext').textContent = 'Bild wird vorbereitet';
+
+    var bereich = auswahl || {x:0, y:0, w:quelle.width, h:quelle.height};
+    var ziel = parseInt($('breite').value, 10);
+    var f = Math.min(ziel / bereich.w, 4);
+    var bw = Math.max(20, Math.round(bereich.w * f));
+    var bh = Math.max(20, Math.round(bereich.h * f));
+
+    arbeit = document.createElement('canvas');
+    arbeit.width = bw; arbeit.height = bh;
+    var ctx = arbeit.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(quelle, bereich.x, bereich.y, bereich.w, bereich.h, 0, 0, bw, bh);
+    aufbereiten(arbeit, $('modus').value);
+
+    var t0 = 0;
+    holeWorker($('sprache').value).then(function(w){
+      return w.setParameters({ tessedit_pageseg_mode: $('psm').value }).then(function(){
+        t0 = (window.performance ? performance.now() : Date.now());
+        return w.recognize(arbeit);
+      });
+    }).then(function(erg){
+      var dauer = ((window.performance ? performance.now() : Date.now()) - t0) / 1000;
+      zeigeErgebnis(erg.data, dauer);
+    }).catch(function(err){
+      zeigeFehler('Die Erkennung ist gescheitert: ' + (err && err.message ? err.message : err) +
+                  '. Ohne Netz gelingt der erste Lauf nicht, weil die Sprachdaten fehlen.');
+    }).then(function(){
+      laeuft = false;
+      $('start').disabled = false;
+      $('fortschritt').style.display = 'none';
+    });
+  });
+
+  /* ---------- Darstellung ---------- */
+
+  function sammleWoerter(data){
+    if(data.words && data.words.length) return data.words;
+    var raus = [];
+    (data.blocks || []).forEach(function(b){
+      (b.paragraphs || []).forEach(function(p){
+        (p.lines || []).forEach(function(l){
+          (l.words || []).forEach(function(w){ raus.push(w); });
+        });
+      });
+    });
+    return raus;
+  }
+
+  function zeilenBilden(woerter){
+    var gueltig = woerter.filter(function(w){ return w.bbox && (w.text || '').trim(); });
+    if(!gueltig.length) return [];
+    var hoehen = gueltig.map(function(w){ return w.bbox.y1 - w.bbox.y0; }).sort(function(a,b){ return a-b; });
+    var toleranz = Math.max(6, hoehen[Math.floor(hoehen.length/2)] * 0.6);
+    var sortiert = gueltig.slice().sort(function(a,b){
+      return (a.bbox.y0 + a.bbox.y1)/2 - (b.bbox.y0 + b.bbox.y1)/2;
+    });
+    var zeilen = [];
+    sortiert.forEach(function(w){
+      var mitte = (w.bbox.y0 + w.bbox.y1) / 2;
+      var letzte = zeilen[zeilen.length - 1];
+      if(letzte && Math.abs(mitte - letzte.mitte) <= toleranz){
+        letzte.woerter.push(w);
+        letzte.summe += mitte;
+        letzte.mitte = letzte.summe / letzte.woerter.length;
+      } else {
+        zeilen.push({ woerter:[w], mitte: mitte, summe: mitte });
+      }
+    });
+    zeilen.forEach(function(z){
+      z.woerter.sort(function(a,b){ return a.bbox.x0 - b.bbox.x0; });
+    });
+    return zeilen;
+  }
+
+  function zeigeErgebnis(data, dauer){
+    var woerter = sammleWoerter(data);
+    var zeilen = zeilenBilden(woerter);
+
+    var summe = 0, schwach = 0;
+    woerter.forEach(function(w){
+      summe += (w.confidence || 0);
+      if((w.confidence || 0) < 75) schwach++;
+    });
+
+    $('zDauer').textContent   = dauer.toFixed(1);
+    $('zWoerter').textContent = woerter.length;
+    $('zSicher').textContent  = woerter.length ? Math.round(summe / woerter.length) + ' %' : '–';
+    $('zSchwach').textContent = schwach;
+
+    // Zeilenansicht
+    var ziel = $('zeilen');
+    ziel.innerHTML = '';
+    if(!zeilen.length){
+      ziel.innerHTML = '<p class="hinweis">Es wurde kein Text gefunden. Engeren Ausschnitt oder eine andere Bildaufbereitung versuchen.</p>';
+    }
+    zeilen.forEach(function(z, i){
+      var d = document.createElement('div');
+      d.className = 'zeile';
+      var nr = document.createElement('span');
+      nr.className = 'nr';
+      nr.textContent = (i + 1);
+      d.appendChild(nr);
+      var letztesEnde = null;
+      z.woerter.forEach(function(w){
+        if(letztesEnde !== null && (w.bbox.x0 - letztesEnde) > (w.bbox.y1 - w.bbox.y0) * 1.2){
+          var l = document.createElement('span');
+          l.className = 'luecke';
+          l.textContent = '|';
+          d.appendChild(l);
+        }
+        var s = document.createElement('span');
+        var c = w.confidence || 0;
+        s.className = 'wort' + (c < 75 ? ' schwach' : (c < 90 ? ' mittel' : ''));
+        s.textContent = w.text;
+        s.title = Math.round(c) + ' %';
+        d.appendChild(s);
+        letztesEnde = w.bbox.x1;
+      });
+      ziel.appendChild(d);
+    });
+
+    // Bild mit Kästen
+    var k = $('kaesten');
+    k.width = arbeit.width; k.height = arbeit.height;
+    var x = k.getContext('2d');
+    x.drawImage(arbeit, 0, 0);
+    x.lineWidth = Math.max(1, Math.round(arbeit.width / 700));
+    woerter.forEach(function(w){
+      if(!w.bbox) return;
+      var c = w.confidence || 0;
+      x.strokeStyle = c < 75 ? '#C0392B' : (c < 90 ? '#D98E0B' : '#7CA82C');
+      x.strokeRect(w.bbox.x0, w.bbox.y0, w.bbox.x1 - w.bbox.x0, w.bbox.y1 - w.bbox.y0);
+    });
+
+    // Rohtext
+    $('roh').textContent = (data.text || '').trim() || '(leer)';
+
+    $('ergebnis').style.display = 'block';
+    $('ergebnis').scrollIntoView({behavior:'smooth', block:'start'});
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll('.reiter button'), function(b){
+    b.addEventListener('click', function(){
+      Array.prototype.forEach.call(document.querySelectorAll('.reiter button'), function(o){
+        o.setAttribute('aria-selected', o === b ? 'true' : 'false');
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('.tafel'), function(t){
+        t.classList.toggle('an', t.id === b.dataset.tafel);
+      });
+    });
+  });
+
+  $('kopieren').addEventListener('click', function(){
+    var t = $('roh').textContent;
+    if(navigator.clipboard){
+      navigator.clipboard.writeText(t).then(function(){
+        $('kopieren').textContent = 'Kopiert';
+        setTimeout(function(){ $('kopieren').textContent = 'Rohtext kopieren'; }, 1500);
+      });
+    }
+  });
+
+  function zeigeFehler(t){
+    var f = $('fehler');
+    f.textContent = t;
+    f.style.display = t ? 'block' : 'none';
+  }
+
+})();
+</script>
+</body>
+</html>
