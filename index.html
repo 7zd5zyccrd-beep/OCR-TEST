@@ -1,18 +1,22 @@
 <!DOCTYPE html>
 <!--
   OCR-Test · Verteilerbeschreibung
-  v0.1 · 19.09.2026
+  v0.2 · 19.09.2026
 
   Eigenständige Testseite, KEINE Änderung am BDS E-Assistent.
-  Zweck: herausfinden, was Tesseract.js aus einem Foto einer gedruckten
-  Verteilerbeschreibung wirklich herausliest, bevor irgendetwas in die App gebaut wird.
 
-  Ablage: als zweite Datei neben index.html ins GitHub-Repository legen,
+  Neu gegenüber v0.1:
+   1. Entzerren – Schräglage wird über das Schwärzungsprofil gemessen und ausgeglichen
+   2. Linien tilgen – lange dünne Züge werden weiß übermalt, Kreuzungen mit Buchstaben bleiben stehen
+   3. Spalten – zwei verschiebbare Trenner, jede Spalte wird für sich gelesen
+   4. Nachbearbeitung – Aufstiegsregel für die Nummern, Wortlisten für Bezeichnung und Ort;
+      was nicht sicher zugeordnet werden kann, bleibt ausdrücklich leer
+
+  Ablage: als zweite Datei neben index.html ins GitHub-Repository,
   erreichbar unter <benutzername>.github.io/<projekt>/ocr-test.html
-  Die Seite braucht https, sonst gibt Safari die Kamera nicht frei.
 
   Engine: Tesseract.js 5 von jsDelivr. Sprachdaten werden beim ersten Lauf
-  geladen und danach im Gerät behalten (IndexedDB), spätere Läufe gehen ohne Netz.
+  geladen und danach im Gerät behalten, spätere Läufe gehen ohne Netz.
 -->
 <html lang="de">
 <head>
@@ -22,59 +26,26 @@
 <title>OCR-Test · Verteilerbeschreibung</title>
 <style>
   :root{
-    --gruen:#A0D241;
-    --gruen-tief:#7CA82C;
-    --dunkel:#1A1F16;
-    --grund:#FBFBF7;
-    --karte:#FFFFFF;
-    --linie:#E2E4DC;
-    --grau:#6B7065;
-    --rot:#C0392B;
-    --bernstein:#D98E0B;
+    --gruen:#A0D241; --gruen-tief:#7CA82C; --dunkel:#1A1F16; --grund:#FBFBF7;
+    --karte:#FFFFFF; --linie:#E2E4DC; --grau:#6B7065; --rot:#C0392B; --bernstein:#D98E0B;
     box-sizing:border-box;
-    padding-top:env(safe-area-inset-top,0px);
-    padding-bottom:env(safe-area-inset-bottom,0px);
+    padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
   }
   *,*::before,*::after{box-sizing:inherit}
-  body{
-    margin:0;
-    font-family:-apple-system,system-ui,"Segoe UI",sans-serif;
-    font-size:17px;
-    line-height:1.45;
-    color:var(--dunkel);
-    background:var(--grund);
-    -webkit-text-size-adjust:100%;
-  }
+  body{margin:0;font-family:-apple-system,system-ui,"Segoe UI",sans-serif;font-size:17px;
+       line-height:1.45;color:var(--dunkel);background:var(--grund);-webkit-text-size-adjust:100%}
   .huelle{max-width:900px;margin:0 auto;padding:18px 16px 60px}
 
   header{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:18px}
   header h1{font-size:21px;margin:0;font-weight:640;letter-spacing:-.01em}
   header .ver{font-size:13px;color:var(--grau)}
 
-  .karte{
-    background:var(--karte);
-    border:1px solid var(--linie);
-    border-radius:16px;
-    padding:16px;
-    margin-bottom:14px;
-  }
+  .karte{background:var(--karte);border:1px solid var(--linie);border-radius:16px;padding:16px;margin-bottom:14px}
   .karte h2{font-size:15px;margin:0 0 12px;font-weight:620;color:var(--grau)}
 
-  button,.knopf{
-    font:inherit;
-    min-height:48px;
-    padding:0 18px;
-    border-radius:14px;
-    border:1px solid var(--gruen-tief);
-    background:var(--gruen);
-    color:var(--dunkel);
-    font-weight:600;
-    cursor:pointer;
-    display:inline-flex;
-    align-items:center;
-    justify-content:center;
-    gap:8px;
-  }
+  button,.knopf{font:inherit;min-height:48px;padding:0 18px;border-radius:14px;
+    border:1px solid var(--gruen-tief);background:var(--gruen);color:var(--dunkel);
+    font-weight:600;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px}
   button.still,.knopf.still{background:#fff;border-color:var(--linie);color:var(--dunkel);font-weight:500}
   button:disabled{opacity:.45;cursor:default}
   button:focus-visible,select:focus-visible,.knopf:focus-visible{outline:3px solid var(--gruen-tief);outline-offset:2px}
@@ -84,18 +55,21 @@
   .felder{display:grid;gap:12px}
   @media (min-width:560px){.felder{grid-template-columns:1fr 1fr}}
   label.feld{display:block;font-size:13px;color:var(--grau);margin-bottom:5px}
-  select{
-    font:inherit;width:100%;min-height:48px;padding:0 12px;
-    border:1px solid var(--linie);border-radius:14px;background:#fff;color:var(--dunkel);
-  }
+  select{font:inherit;width:100%;min-height:48px;padding:0 12px;border:1px solid var(--linie);
+    border-radius:14px;background:#fff;color:var(--dunkel)}
+  .schalter{display:flex;align-items:center;gap:10px;min-height:48px;font-size:16px}
+  .schalter input{width:24px;height:24px;accent-color:var(--gruen-tief)}
 
   #bildbereich{display:none}
   .buehne{position:relative;touch-action:none;user-select:none;-webkit-user-select:none;line-height:0}
   .buehne canvas{width:100%;height:auto;border-radius:12px;display:block;background:#EFEFEA}
-  #rahmen{
-    position:absolute;border:2px solid var(--gruen-tief);
-    background:rgba(160,210,65,.22);border-radius:4px;pointer-events:none;display:none;
-  }
+  #rahmen{position:absolute;border:2px solid var(--gruen-tief);background:rgba(160,210,65,.16);
+    border-radius:4px;pointer-events:none;display:none}
+  .griff{position:absolute;top:0;width:34px;margin-left:-17px;cursor:ew-resize;
+    display:none;touch-action:none;z-index:3}
+  .griff::before{content:"";position:absolute;left:16px;top:0;bottom:0;width:3px;background:#1E6FD9}
+  .griff::after{content:"";position:absolute;left:5px;top:50%;margin-top:-13px;width:25px;height:26px;
+    border-radius:8px;background:#1E6FD9;opacity:.92}
   .hinweis{font-size:14px;color:var(--grau);margin:10px 0 0}
 
   #fortschritt{display:none;margin-top:14px}
@@ -113,28 +87,28 @@
   .zahlen{display:flex;gap:18px;flex-wrap:wrap;font-size:14px;color:var(--grau);margin-bottom:14px}
   .zahlen b{display:block;font-size:19px;color:var(--dunkel);font-weight:640}
 
-  .zeile{padding:7px 0;border-bottom:1px solid var(--linie);display:flex;flex-wrap:wrap;gap:6px;align-items:baseline}
-  .zeile:last-child{border-bottom:0}
-  .zeile .nr{font-size:12px;color:var(--grau);min-width:26px}
-  .wort{padding:1px 6px;border-radius:6px;background:#F1F4EB}
-  .wort.mittel{background:#FCEFD2}
-  .wort.schwach{background:#F8DDDA;color:var(--rot)}
-  .luecke{opacity:.35}
+  table.erg{width:100%;border-collapse:collapse;font-size:15px}
+  table.erg th{text-align:left;font-size:12px;color:var(--grau);font-weight:600;padding:0 6px 6px 0}
+  table.erg td{padding:8px 6px 8px 0;border-top:1px solid var(--linie);vertical-align:top}
+  table.erg td.nr{white-space:nowrap;font-weight:640;width:22%}
+  .klein-roh{display:block;font-size:12px;color:var(--grau)}
+  .geaendert{color:var(--gruen-tief);font-weight:640}
+  .unklar{color:var(--rot)}
+  .leer{color:var(--rot);font-style:italic}
 
-  pre#roh{
-    white-space:pre-wrap;word-break:break-word;
-    font-family:ui-monospace,Menlo,monospace;font-size:14px;line-height:1.5;
-    background:#F6F7F3;border:1px solid var(--linie);border-radius:12px;padding:12px;margin:0 0 12px;
-  }
+  pre.roh{white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,Menlo,monospace;
+    font-size:13px;line-height:1.5;background:#F6F7F3;border:1px solid var(--linie);
+    border-radius:12px;padding:12px;margin:0 0 12px}
+  h3.klein{font-size:13px;color:var(--grau);margin:16px 0 6px;font-weight:600}
   .legende{font-size:13px;color:var(--grau);margin-top:12px}
-  .legende span{display:inline-block;width:11px;height:11px;border-radius:3px;vertical-align:-1px;margin-right:4px}
 
   details{border-top:1px solid var(--linie);padding-top:14px;margin-top:6px}
   summary{font-size:15px;font-weight:600;cursor:pointer}
   details p,details li{font-size:15px;color:var(--grau)}
   details ul{padding-left:20px}
 
-  .fehler{background:#F8DDDA;border:1px solid #E8B6B0;color:#8B2B20;border-radius:12px;padding:12px;font-size:15px;margin-top:12px;display:none}
+  .fehler{background:#F8DDDA;border:1px solid #E8B6B0;color:#8B2B20;border-radius:12px;
+    padding:12px;font-size:15px;margin-top:12px;display:none}
   input[type=file]{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
 </style>
 </head>
@@ -143,7 +117,7 @@
 
   <header>
     <h1>OCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.1 · 19.09.2026</span>
+    <span class="ver">v0.2 · 19.09.2026</span>
   </header>
 
   <div class="karte">
@@ -152,19 +126,22 @@
       <label class="knopf" for="datei">Foto aufnehmen oder wählen</label>
       <input type="file" id="datei" accept="image/*">
     </div>
-    <p class="hinweis" id="dateiinfo">Am besten nah heran und möglichst gerade von vorn, damit die Abdeckung nicht spiegelt.</p>
+    <p class="hinweis" id="dateiinfo">Möglichst gerade von vorn, damit die Abdeckung nicht spiegelt.</p>
   </div>
 
   <div class="karte" id="bildbereich">
-    <h2>Ausschnitt</h2>
+    <h2>Ausschnitt und Spalten</h2>
     <div class="buehne" id="buehne">
       <canvas id="vorschau"></canvas>
       <div id="rahmen"></div>
+      <div class="griff" id="griff0"></div>
+      <div class="griff" id="griff1"></div>
     </div>
-    <p class="hinweis">Ziehe mit dem Finger ein Rechteck über die Beschriftung. Ohne Auswahl wird das ganze Bild gelesen.</p>
+    <p class="hinweis">Zuerst mit dem Finger ein Rechteck über die Beschriftung ziehen. Danach die beiden blauen Trenner zwischen die Spalten schieben: links die Nummern, in der Mitte die Bezeichnungen, rechts die Orte.</p>
     <div class="knopfreihe" style="margin-top:12px">
       <button class="still" id="ganz">Ganzes Bild</button>
       <button class="still" id="drehen">Drehen</button>
+      <button class="still" id="autoSpalten">Spalten vorschlagen</button>
     </div>
   </div>
 
@@ -182,28 +159,15 @@
       <div>
         <label class="feld" for="modus">Bildaufbereitung</label>
         <select id="modus">
-          <option value="orig">Original</option>
           <option value="grau" selected>Graustufen, Kontrast angehoben</option>
           <option value="sw">Schwarzweiß, harter Schwellwert</option>
+          <option value="orig">Original</option>
         </select>
       </div>
-      <div>
-        <label class="feld" for="psm">Textaufbau</label>
-        <select id="psm">
-          <option value="6" selected>Ein Block mit Zeilen</option>
-          <option value="4">Spalten unterschiedlicher Größe</option>
-          <option value="3">Automatisch</option>
-          <option value="11">Verstreute Textstücke</option>
-        </select>
-      </div>
-      <div>
-        <label class="feld" for="sprache">Sprache</label>
-        <select id="sprache">
-          <option value="deu" selected>Deutsch</option>
-          <option value="deu+eng">Deutsch und Englisch</option>
-          <option value="eng">Englisch</option>
-        </select>
-      </div>
+      <div class="schalter"><input type="checkbox" id="optEntzerren" checked><label for="optEntzerren">Schräglage ausgleichen</label></div>
+      <div class="schalter"><input type="checkbox" id="optLinien" checked><label for="optLinien">Tabellenlinien tilgen</label></div>
+      <div class="schalter"><input type="checkbox" id="optSpalten" checked><label for="optSpalten">Spalten einzeln lesen</label></div>
+      <div class="schalter"><input type="checkbox" id="optNach" checked><label for="optNach">Nummern und Wörter nachbearbeiten</label></div>
     </div>
     <div class="knopfreihe" style="margin-top:14px">
       <button id="start" class="breit">Text erkennen</button>
@@ -221,30 +185,26 @@
       <div><b id="zDauer">–</b>Sekunden</div>
       <div><b id="zWoerter">–</b>Wörter</div>
       <div><b id="zSicher">–</b>mittlere Sicherheit</div>
-      <div><b id="zSchwach">–</b>unter 75 %</div>
+      <div><b id="zWinkel">–</b>Schräglage</div>
     </div>
     <div class="reiter" role="tablist">
-      <button role="tab" aria-selected="true" data-tafel="tZeilen">Zeilen</button>
-      <button role="tab" aria-selected="false" data-tafel="tBild">Bild mit Kästen</button>
+      <button role="tab" aria-selected="true" data-tafel="tTabelle">Tabelle</button>
+      <button role="tab" aria-selected="false" data-tafel="tBild">Bild</button>
       <button role="tab" aria-selected="false" data-tafel="tRoh">Rohtext</button>
     </div>
 
-    <div class="tafel an" id="tZeilen">
-      <div id="zeilen"></div>
-      <p class="legende">
-        <span style="background:#F1F4EB"></span>sicher
-        <span style="background:#FCEFD2;margin-left:12px"></span>75 bis 89 %
-        <span style="background:#F8DDDA;margin-left:12px"></span>unter 75 %
-      </p>
+    <div class="tafel an" id="tTabelle">
+      <div id="tabelle"></div>
+      <p class="legende">Grün heißt korrigiert, rot heißt unsicher oder bewusst leer gelassen. Unter jedem Eintrag steht klein, was die Engine tatsächlich gelesen hat.</p>
     </div>
 
     <div class="tafel" id="tBild">
       <canvas id="kaesten" style="width:100%;height:auto;border-radius:12px"></canvas>
-      <p class="hinweis">So hat die Engine das Bild gesehen. Zum Vergrößern mit zwei Fingern aufziehen.</p>
+      <p class="hinweis">So hat die Engine das Bild nach der Aufbereitung gesehen. Zum Vergrößern mit zwei Fingern aufziehen.</p>
     </div>
 
     <div class="tafel" id="tRoh">
-      <pre id="roh"></pre>
+      <div id="rohtexte"></div>
       <button class="still" id="kopieren">Rohtext kopieren</button>
     </div>
   </div>
@@ -253,12 +213,12 @@
     <summary>Wenn das Ergebnis schlecht ist</summary>
     <ul>
       <li>Ausschnitt enger ziehen, nur die Beschriftung, kein Verteilerrahmen.</li>
-      <li>Auf 3000 px gehen, das hilft bei kleiner Schrift am meisten.</li>
-      <li>Spiegelt die Abdeckung, ein zweites Foto schräg von der Seite versuchen oder die Abdeckung abnehmen.</li>
-      <li>Bei blassem Druck Schwarzweiß probieren, bei grauem Untergrund Graustufen.</li>
-      <li>Stehen die Spalten falsch zusammen, den Textaufbau auf Spalten oder Automatisch stellen.</li>
+      <li>Die Trenner genau in die Lücken zwischen den Spalten schieben, nicht auf die Linie.</li>
+      <li>Schalter einzeln aus- und wieder anstellen, dann sieht man, was welcher Schritt bringt.</li>
+      <li>Bei blassem Druck Schwarzweiß, bei grauem Untergrund Graustufen.</li>
+      <li>Auf 3000 px gehen, wenn die Schrift klein ist.</li>
     </ul>
-    <p>Der erste Lauf lädt Engine und Sprachdaten nach, das braucht Netz und etwas Geduld. Danach bleiben sie im Gerät, auch ohne Empfang.</p>
+    <p>Der erste Lauf lädt Engine und Sprachdaten nach, das braucht Netz. Danach bleiben sie im Gerät.</p>
   </details>
 
 </div>
@@ -268,16 +228,26 @@
 (function(){
   'use strict';
 
-  var quelle = null;        // Canvas mit dem vollständigen Foto
-  var arbeit = null;        // Canvas, der tatsächlich gelesen wurde
-  var auswahl = null;       // Rechteck in Quellkoordinaten
-  var worker = null;
-  var workerSprache = '';
-  var laeuft = false;
+  var quelle = null, arbeit = null, auswahl = null;
+  var trenner = [0.16, 0.56];
+  var worker = null, workerBereit = false, laeuft = false;
+  var letzteRohtexte = '';
 
-  var $ = function(id){ return document.getElementById(id); };
+  function $(id){ return document.getElementById(id); }
 
-  /* ---------- Foto laden ---------- */
+  /* ================= Wortlisten ================= */
+
+  var BEZEICHNUNGEN = ['Licht','Steckdose','Steckdosen','Beleuchtung','E-Herd','Herd','Backofen',
+    'Geschirrspüler','Waschmaschine','Trockner','Kühlschrank','Mikrowelle','Dunstabzug',
+    'Fehlerstromschutzschalter','Überspannungsschutz','Überspannungsableiter','Hauptschalter',
+    'Stromstoßschalter','Trafo','CEE-Steckdose','Klingel','Durchlauferhitzer','Warmwasser',
+    'Boiler','Heizung','Rollladen','Arbeitsfläche','Außensteckdose','Reserve','Zuleitung','Garage'];
+
+  var ORTE = ['Bad','Badezimmer','Küche','Flur','Diele','Wohnzimmer','Schlafzimmer','Kinderzimmer',
+    'Esszimmer','Büro','Balkon','Terrasse','Keller','Kammer','Speisekammer','Abstellraum',
+    'Hauswirtschaftsraum','Wohnung','WC','Gäste-WC','Garage','Dachboden'];
+
+  /* ================= Foto laden ================= */
 
   $('datei').addEventListener('change', function(e){
     var datei = e.target.files && e.target.files[0];
@@ -285,13 +255,14 @@
     zeigeFehler('');
     ladeBild(datei).then(function(){
       auswahl = null;
+      trenner = [0.16, 0.56];
       $('bildbereich').style.display = 'block';
       $('optionen').style.display = 'block';
       $('ergebnis').style.display = 'none';
       $('dateiinfo').textContent = quelle.width + ' × ' + quelle.height + ' Bildpunkte, ' + Math.round(datei.size/1024) + ' KB';
       zeichneVorschau();
     }).catch(function(){
-      zeigeFehler('Das Bild ließ sich nicht öffnen. Versuche ein anderes Format als HEIC, etwa einen Bildschirmfoto-Ausschnitt.');
+      zeigeFehler('Das Bild ließ sich nicht öffnen. Versuche ein anderes Format als HEIC.');
     });
   });
 
@@ -321,28 +292,41 @@
     });
   }
 
-  /* ---------- Vorschau und Auswahl ---------- */
+  /* ================= Vorschau, Auswahl, Trenner ================= */
+
+  function bereich(){
+    return auswahl || {x:0, y:0, w:quelle.width, h:quelle.height};
+  }
 
   function zeichneVorschau(){
     var c = $('vorschau');
     var breite = $('buehne').clientWidth || 320;
-    var faktor = breite / quelle.width;
-    c.width = Math.round(quelle.width * faktor);
-    c.height = Math.round(quelle.height * faktor);
+    var f = breite / quelle.width;
+    c.width = Math.round(quelle.width * f);
+    c.height = Math.round(quelle.height * f);
     c.getContext('2d').drawImage(quelle, 0, 0, c.width, c.height);
     zeichneRahmen();
   }
 
   function zeichneRahmen(){
-    var r = $('rahmen');
-    if(!auswahl){ r.style.display = 'none'; return; }
     var c = $('vorschau');
-    var f = c.clientWidth / quelle.width;
-    r.style.display = 'block';
-    r.style.left   = (auswahl.x * f) + 'px';
-    r.style.top    = (auswahl.y * f) + 'px';
-    r.style.width  = (auswahl.w * f) + 'px';
-    r.style.height = (auswahl.h * f) + 'px';
+    var f = (c.clientWidth || c.width) / quelle.width;
+    var r = $('rahmen');
+    if(auswahl){
+      r.style.display = 'block';
+      r.style.left = (auswahl.x*f)+'px'; r.style.top = (auswahl.y*f)+'px';
+      r.style.width = (auswahl.w*f)+'px'; r.style.height = (auswahl.h*f)+'px';
+    } else {
+      r.style.display = 'none';
+    }
+    var b = bereich();
+    for(var i=0;i<2;i++){
+      var g = $('griff'+i);
+      g.style.display = 'block';
+      g.style.left = ((b.x + b.w*trenner[i]) * f) + 'px';
+      g.style.top = (b.y*f)+'px';
+      g.style.height = (b.h*f)+'px';
+    }
   }
 
   var zieht = false, startX = 0, startY = 0;
@@ -351,8 +335,7 @@
     if(!quelle) return;
     var b = $('vorschau').getBoundingClientRect();
     zieht = true;
-    startX = e.clientX - b.left;
-    startY = e.clientY - b.top;
+    startX = e.clientX - b.left; startY = e.clientY - b.top;
     $('buehne').setPointerCapture(e.pointerId);
     e.preventDefault();
   });
@@ -364,10 +347,8 @@
     var y = Math.max(0, Math.min(b.height, e.clientY - b.top));
     var f = quelle.width / b.width;
     auswahl = {
-      x: Math.round(Math.min(startX, x) * f),
-      y: Math.round(Math.min(startY, y) * f),
-      w: Math.round(Math.abs(x - startX) * f),
-      h: Math.round(Math.abs(y - startY) * f)
+      x: Math.round(Math.min(startX,x)*f), y: Math.round(Math.min(startY,y)*f),
+      w: Math.round(Math.abs(x-startX)*f), h: Math.round(Math.abs(y-startY)*f)
     };
     zeichneRahmen();
     e.preventDefault();
@@ -376,10 +357,37 @@
   function zugEnde(){
     if(!zieht) return;
     zieht = false;
-    if(auswahl && (auswahl.w < 30 || auswahl.h < 20)){ auswahl = null; zeichneRahmen(); }
+    if(auswahl && (auswahl.w < 40 || auswahl.h < 30)) auswahl = null;
+    zeichneRahmen();
   }
   $('buehne').addEventListener('pointerup', zugEnde);
   $('buehne').addEventListener('pointercancel', zugEnde);
+
+  [0,1].forEach(function(i){
+    var g = $('griff'+i);
+    g.addEventListener('pointerdown', function(e){
+      e.stopPropagation();
+      g.setPointerCapture(e.pointerId);
+      g.dataset.aktiv = '1';
+      e.preventDefault();
+    });
+    g.addEventListener('pointermove', function(e){
+      if(g.dataset.aktiv !== '1') return;
+      e.stopPropagation();
+      var r = $('vorschau').getBoundingClientRect();
+      var f = quelle.width / r.width;
+      var px = (e.clientX - r.left) * f;
+      var b = bereich();
+      trenner[i] = Math.max(0.02, Math.min(0.98, (px - b.x) / b.w));
+      if(i === 0 && trenner[0] > trenner[1] - 0.04) trenner[0] = trenner[1] - 0.04;
+      if(i === 1 && trenner[1] < trenner[0] + 0.04) trenner[1] = trenner[0] + 0.04;
+      zeichneRahmen();
+      e.preventDefault();
+    });
+    function aus(e){ g.dataset.aktiv = '0'; if(e) e.stopPropagation(); }
+    g.addEventListener('pointerup', aus);
+    g.addEventListener('pointercancel', aus);
+  });
 
   $('ganz').addEventListener('click', function(){ auswahl = null; zeichneRahmen(); });
 
@@ -388,74 +396,230 @@
     var c = document.createElement('canvas');
     c.width = quelle.height; c.height = quelle.width;
     var x = c.getContext('2d');
-    x.translate(c.width/2, c.height/2);
-    x.rotate(Math.PI/2);
+    x.translate(c.width/2, c.height/2); x.rotate(Math.PI/2);
     x.drawImage(quelle, -quelle.width/2, -quelle.height/2);
-    quelle = c;
-    auswahl = null;
+    quelle = c; auswahl = null;
     zeichneVorschau();
+  });
+
+  $('autoSpalten').addEventListener('click', function(){
+    if(!quelle) return;
+    var b = bereich();
+    var k = document.createElement('canvas');
+    var br = 400, f = br/b.w;
+    k.width = br; k.height = Math.max(1, Math.round(b.h*f));
+    k.getContext('2d').drawImage(quelle, b.x,b.y,b.w,b.h, 0,0,k.width,k.height);
+    var d = k.getContext('2d').getImageData(0,0,k.width,k.height).data;
+    var spalte = new Float64Array(k.width), i, x, y, g;
+    for(y=0;y<k.height;y++) for(x=0;x<k.width;x++){
+      i = (y*k.width+x)*4;
+      g = d[i]*0.299 + d[i+1]*0.587 + d[i+2]*0.114;
+      if(g < 140) spalte[x]++;
+    }
+    var gl = new Float64Array(k.width);
+    for(x=0;x<k.width;x++){
+      var s=0,n=0;
+      for(var j=-4;j<=4;j++){ var xx=x+j; if(xx>=0&&xx<k.width){ s+=spalte[xx]; n++; } }
+      gl[x] = s/n;
+    }
+    var t = [];
+    [[0.06,0.35],[0.35,0.80]].forEach(function(fenster){
+      var von = Math.round(k.width*fenster[0]), bis = Math.round(k.width*fenster[1]);
+      var best = von, bestWert = Infinity;
+      for(x=von;x<bis;x++) if(gl[x] < bestWert){ bestWert = gl[x]; best = x; }
+      t.push(best / k.width);
+    });
+    if(t[1] < t[0] + 0.06) t[1] = Math.min(0.9, t[0] + 0.12);
+    trenner = t;
+    zeichneRahmen();
   });
 
   window.addEventListener('resize', function(){ if(quelle) zeichneVorschau(); });
 
-  /* ---------- Bildaufbereitung ---------- */
-
-  function aufbereiten(canvas, modus){
-    if(modus === 'orig') return;
-    var ctx = canvas.getContext('2d');
-    var bild = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    var d = bild.data, i, g;
-    var hist = new Array(256); for(i=0;i<256;i++) hist[i] = 0;
-
-    for(i=0; i<d.length; i+=4){
-      g = (d[i]*0.299 + d[i+1]*0.587 + d[i+2]*0.114) | 0;
-      d[i] = d[i+1] = d[i+2] = g;
-      hist[g]++;
-    }
-
-    var gesamt = d.length / 4;
-
-    if(modus === 'grau'){
-      // Kontrast über die 2-%- und 98-%-Grenze aufziehen
-      var zaehl = 0, unten = 0, oben = 255, ziel = gesamt * 0.02;
-      for(i=0;i<256;i++){ zaehl += hist[i]; if(zaehl >= ziel){ unten = i; break; } }
-      zaehl = 0; ziel = gesamt * 0.02;
-      for(i=255;i>=0;i--){ zaehl += hist[i]; if(zaehl >= ziel){ oben = i; break; } }
-      var spanne = Math.max(1, oben - unten);
-      for(i=0; i<d.length; i+=4){
-        g = ((d[i] - unten) * 255 / spanne) | 0;
-        g = g < 0 ? 0 : (g > 255 ? 255 : g);
-        d[i] = d[i+1] = d[i+2] = g;
-      }
-    } else if(modus === 'sw'){
-      var s = otsu(hist, gesamt);
-      for(i=0; i<d.length; i+=4){
-        g = d[i] > s ? 255 : 0;
-        d[i] = d[i+1] = d[i+2] = g;
-      }
-    }
-    ctx.putImageData(bild, 0, 0);
-  }
+  /* ================= Bildaufbereitung ================= */
 
   function otsu(hist, gesamt){
-    var summe = 0, i;
-    for(i=0;i<256;i++) summe += i * hist[i];
-    var summeB = 0, wB = 0, wF = 0, max = 0, schwelle = 128, mB, mF, zwischen;
+    var summe=0, i;
+    for(i=0;i<256;i++) summe += i*hist[i];
+    var summeB=0, wB=0, wF=0, max=0, schwelle=128, mB, mF, zw;
     for(i=0;i<256;i++){
-      wB += hist[i];
-      if(wB === 0) continue;
-      wF = gesamt - wB;
-      if(wF === 0) break;
-      summeB += i * hist[i];
-      mB = summeB / wB;
-      mF = (summe - summeB) / wF;
-      zwischen = wB * wF * (mB - mF) * (mB - mF);
-      if(zwischen > max){ max = zwischen; schwelle = i; }
+      wB += hist[i]; if(wB===0) continue;
+      wF = gesamt - wB; if(wF===0) break;
+      summeB += i*hist[i];
+      mB = summeB/wB; mF = (summe-summeB)/wF;
+      zw = wB*wF*(mB-mF)*(mB-mF);
+      if(zw>max){ max=zw; schwelle=i; }
     }
     return schwelle;
   }
 
-  /* ---------- Erkennung ---------- */
+  function graustufen(canvas){
+    var ctx = canvas.getContext('2d');
+    var bild = ctx.getImageData(0,0,canvas.width,canvas.height);
+    var d = bild.data, n = canvas.width*canvas.height, i, g;
+    var grau = new Uint8Array(n), hist = new Array(256);
+    for(i=0;i<256;i++) hist[i]=0;
+    for(i=0;i<n;i++){
+      g = (d[i*4]*0.299 + d[i*4+1]*0.587 + d[i*4+2]*0.114) | 0;
+      grau[i] = g; hist[g]++;
+    }
+    return {bild:bild, grau:grau, hist:hist, n:n};
+  }
+
+  function aufbereiten(canvas, modus){
+    if(modus === 'orig') return;
+    var ctx = canvas.getContext('2d');
+    var t = graustufen(canvas);
+    var d = t.bild.data, i, g;
+    for(i=0;i<t.n;i++){ d[i*4]=d[i*4+1]=d[i*4+2]=t.grau[i]; }
+    if(modus === 'grau'){
+      var zaehl=0, unten=0, oben=255, ziel=t.n*0.02;
+      for(i=0;i<256;i++){ zaehl+=t.hist[i]; if(zaehl>=ziel){ unten=i; break; } }
+      zaehl=0;
+      for(i=255;i>=0;i--){ zaehl+=t.hist[i]; if(zaehl>=ziel){ oben=i; break; } }
+      var spanne = Math.max(1, oben-unten);
+      for(i=0;i<t.n;i++){
+        g = ((t.grau[i]-unten)*255/spanne)|0;
+        g = g<0?0:(g>255?255:g);
+        d[i*4]=d[i*4+1]=d[i*4+2]=g;
+      }
+    } else if(modus === 'sw'){
+      var s = otsu(t.hist, t.n);
+      for(i=0;i<t.n;i++){
+        g = t.grau[i] > s ? 255 : 0;
+        d[i*4]=d[i*4+1]=d[i*4+2]=g;
+      }
+    }
+    ctx.putImageData(t.bild, 0, 0);
+  }
+
+  function schraeglage(canvas){
+    var br = 500;
+    var f = br / canvas.width;
+    var h = Math.max(2, Math.round(canvas.height*f));
+    var k = document.createElement('canvas');
+    k.width = br; k.height = h;
+    k.getContext('2d').drawImage(canvas, 0,0, br, h);
+    var t = graustufen(k);
+    var s = otsu(t.hist, t.n);
+    var bin = new Uint8Array(t.n), i;
+    for(i=0;i<t.n;i++) bin[i] = t.grau[i] < s ? 1 : 0;
+
+    var bester = 0, besteVar = -1, grad, x, y;
+    for(grad = -5; grad <= 5.0001; grad += 0.25){
+      var m = Math.tan(grad*Math.PI/180);
+      var prof = new Float64Array(h);
+      for(x=0;x<br;x++){
+        var off = Math.round(x*m);
+        for(y=0;y<h;y++){
+          if(bin[y*br+x]){
+            var yy = y - off;
+            if(yy>=0 && yy<h) prof[yy]++;
+          }
+        }
+      }
+      var mw=0;
+      for(i=0;i<h;i++) mw += prof[i];
+      mw /= h;
+      var v=0, dd;
+      for(i=0;i<h;i++){ dd = prof[i]-mw; v += dd*dd; }
+      if(v > besteVar){ besteVar = v; bester = grad; }
+    }
+    return bester;
+  }
+
+  function drehenUm(canvas, grad){
+    if(Math.abs(grad) < 0.12) return canvas;
+    var c = document.createElement('canvas');
+    c.width = canvas.width; c.height = canvas.height;
+    var x = c.getContext('2d');
+    x.fillStyle = '#FFFFFF';
+    x.fillRect(0,0,c.width,c.height);
+    x.translate(c.width/2, c.height/2);
+    x.rotate(-grad*Math.PI/180);
+    x.drawImage(canvas, -canvas.width/2, -canvas.height/2);
+    return c;
+  }
+
+  function schliessen(feld, laenge, luecke){
+    var i = 0, j, k, z;
+    while(i < laenge){
+      if(feld[i]){
+        j = i;
+        while(j<laenge && feld[j]) j++;
+        k = j;
+        while(k<laenge && !feld[k]) k++;
+        if(k<laenge && (k-j) <= luecke){ for(z=j;z<k;z++) feld[z] = 1; i = k; }
+        else i = j;
+      } else i++;
+    }
+  }
+
+  function linienTilgen(canvas){
+    var ctx = canvas.getContext('2d');
+    var W = canvas.width, H = canvas.height;
+    var t = graustufen(canvas);
+    var s = otsu(t.hist, t.n);
+    var bin = new Uint8Array(t.n), i;
+    for(i=0;i<t.n;i++) bin[i] = t.grau[i] < s ? 1 : 0;
+
+    var lueckeW = Math.max(2, Math.round(W/300));
+    var lueckeH = Math.max(2, Math.round(H/300));
+    var minW = Math.round(W/20);
+    var minH = Math.round(H/20);
+    var maxDick = Math.max(3, Math.round(W/320));
+    var weg = new Uint8Array(t.n);
+    var x, y, x0, y0, xx, yy, o, u, l, r;
+
+    var zeile = new Uint8Array(W);
+    for(y=0;y<H;y++){
+      for(x=0;x<W;x++) zeile[x] = bin[y*W+x];
+      schliessen(zeile, W, lueckeW);
+      x = 0;
+      while(x<W){
+        if(zeile[x]){
+          x0 = x;
+          while(x<W && zeile[x]) x++;
+          if(x-x0 >= minW){
+            for(xx=x0; xx<x; xx++){
+              if(!bin[y*W+xx]) continue;
+              o=y; while(o>0 && bin[(o-1)*W+xx]) o--;
+              u=y; while(u<H-1 && bin[(u+1)*W+xx]) u++;
+              if(u-o+1 <= maxDick) weg[y*W+xx] = 1;
+            }
+          }
+        } else x++;
+      }
+    }
+
+    var spalte = new Uint8Array(H);
+    for(x=0;x<W;x++){
+      for(y=0;y<H;y++) spalte[y] = bin[y*W+x];
+      schliessen(spalte, H, lueckeH);
+      y = 0;
+      while(y<H){
+        if(spalte[y]){
+          y0 = y;
+          while(y<H && spalte[y]) y++;
+          if(y-y0 >= minH){
+            for(yy=y0; yy<y; yy++){
+              if(!bin[yy*W+x]) continue;
+              l=x; while(l>0 && bin[yy*W+(l-1)]) l--;
+              r=x; while(r<W-1 && bin[yy*W+(r+1)]) r++;
+              if(r-l+1 <= maxDick) weg[yy*W+x] = 1;
+            }
+          }
+        } else y++;
+      }
+    }
+
+    var d = t.bild.data, anzahl = 0;
+    for(i=0;i<t.n;i++) if(weg[i]){ d[i*4]=d[i*4+1]=d[i*4+2]=255; anzahl++; }
+    ctx.putImageData(t.bild, 0, 0);
+    return anzahl;
+  }
+
+  /* ================= Erkennung ================= */
 
   var texte = {
     'loading tesseract core':'Engine wird geladen',
@@ -464,29 +628,46 @@
     'initializing api':'Wird vorbereitet',
     'recognizing text':'Text wird gelesen'
   };
+  var schritt = '';
 
   function melde(m){
     if(!m || !m.status) return;
     var t = texte[m.status] || m.status;
-    $('lauftext').textContent = t;
-    $('balken').style.width = Math.round((m.progress || 0) * 100) + '%';
+    $('lauftext').textContent = schritt ? (schritt + ': ' + t) : t;
+    $('balken').style.width = Math.round((m.progress||0)*100) + '%';
   }
 
-  function holeWorker(sprache){
-    if(worker && workerSprache === sprache) return Promise.resolve(worker);
-    var alt = worker ? worker.terminate() : Promise.resolve();
-    return alt.then(function(){
-      return Tesseract.createWorker(sprache, 1, { logger: melde });
-    }).then(function(w){
-      worker = w; workerSprache = sprache;
+  function holeWorker(){
+    if(worker && workerBereit) return Promise.resolve(worker);
+    return Tesseract.createWorker('deu', 1, { logger: melde }).then(function(w){
+      worker = w; workerBereit = true;
       return w;
     });
+  }
+
+  function lese(w, canvas, psm, weiss){
+    return w.setParameters({
+      tessedit_pageseg_mode: psm,
+      tessedit_char_whitelist: weiss || ''
+    }).then(function(){
+      return w.recognize(canvas);
+    });
+  }
+
+  function teilCanvas(quell, x0, x1){
+    var b = Math.max(4, Math.round(x1-x0));
+    var c = document.createElement('canvas');
+    c.width = b + 20; c.height = quell.height + 20;
+    var x = c.getContext('2d');
+    x.fillStyle = '#FFFFFF'; x.fillRect(0,0,c.width,c.height);
+    x.drawImage(quell, Math.round(x0), 0, b, quell.height, 10, 10, b, quell.height);
+    return c;
   }
 
   $('start').addEventListener('click', function(){
     if(laeuft || !quelle) return;
     if(typeof Tesseract === 'undefined'){
-      zeigeFehler('Die Erkennungs-Engine wurde nicht geladen. Prüfe die Internetverbindung und lade die Seite neu.');
+      zeigeFehler('Die Erkennungs-Engine wurde nicht geladen. Internetverbindung prüfen und Seite neu laden.');
       return;
     }
     laeuft = true;
@@ -494,50 +675,90 @@
     $('start').disabled = true;
     $('fortschritt').style.display = 'block';
     $('balken').style.width = '0%';
-    $('lauftext').textContent = 'Bild wird vorbereitet';
+    schritt = '';
+    $('lauftext').textContent = 'Bild wird aufbereitet';
 
-    var bereich = auswahl || {x:0, y:0, w:quelle.width, h:quelle.height};
+    var b = bereich();
     var ziel = parseInt($('breite').value, 10);
-    var f = Math.min(ziel / bereich.w, 4);
-    var bw = Math.max(20, Math.round(bereich.w * f));
-    var bh = Math.max(20, Math.round(bereich.h * f));
+    var f = Math.min(ziel/b.w, 4);
+    var bw = Math.max(40, Math.round(b.w*f));
+    var bh = Math.max(40, Math.round(b.h*f));
 
     arbeit = document.createElement('canvas');
     arbeit.width = bw; arbeit.height = bh;
     var ctx = arbeit.getContext('2d');
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(quelle, bereich.x, bereich.y, bereich.w, bereich.h, 0, 0, bw, bh);
-    aufbereiten(arbeit, $('modus').value);
+    ctx.drawImage(quelle, b.x, b.y, b.w, b.h, 0, 0, bw, bh);
 
+    setTimeout(function(){
+      var winkel = 0;
+      try{
+        if($('optEntzerren').checked){
+          winkel = schraeglage(arbeit);
+          arbeit = drehenUm(arbeit, winkel);
+        }
+        aufbereiten(arbeit, $('modus').value);
+        if($('optLinien').checked) linienTilgen(arbeit);
+      }catch(err){
+        zeigeFehler('Die Aufbereitung ist gescheitert: ' + (err && err.message ? err.message : err));
+        laeuft = false; $('start').disabled = false; $('fortschritt').style.display = 'none';
+        return;
+      }
+      erkennen(winkel);
+    }, 30);
+  });
+
+  function erkennen(winkel){
     var t0 = 0;
-    holeWorker($('sprache').value).then(function(w){
-      return w.setParameters({ tessedit_pageseg_mode: $('psm').value }).then(function(){
-        t0 = (window.performance ? performance.now() : Date.now());
-        return w.recognize(arbeit);
-      });
-    }).then(function(erg){
-      var dauer = ((window.performance ? performance.now() : Date.now()) - t0) / 1000;
-      zeigeErgebnis(erg.data, dauer);
-    }).catch(function(err){
+    var einzeln = $('optSpalten').checked;
+    holeWorker().then(function(w){
+      t0 = (window.performance ? performance.now() : Date.now());
+      if(!einzeln){
+        schritt = '';
+        return lese(w, arbeit, '6', '').then(function(e){
+          return [{name:'Alles', data:e.data, x0:0}];
+        });
+      }
+      var g0 = Math.round(arbeit.width*trenner[0]);
+      var g1 = Math.round(arbeit.width*trenner[1]);
+      var teile = [
+        {name:'Nummer',      c:teilCanvas(arbeit, 0,  g0),               x0:0,  psm:'6', weiss:'0123456789-/'},
+        {name:'Bezeichnung', c:teilCanvas(arbeit, g0, g1),               x0:g0, psm:'6', weiss:''},
+        {name:'Ort',         c:teilCanvas(arbeit, g1, arbeit.width),     x0:g1, psm:'6', weiss:''}
+      ];
+      var raus = [];
+      return teile.reduce(function(kette, teil){
+        return kette.then(function(){
+          schritt = teil.name;
+          return lese(w, teil.c, teil.psm, teil.weiss).then(function(e){
+            raus.push({name:teil.name, data:e.data, x0:teil.x0});
+          });
+        });
+      }, Promise.resolve()).then(function(){ return raus; });
+    }).then(function(teile){
+      var dauer = ((window.performance ? performance.now() : Date.now()) - t0)/1000;
+      zeigeErgebnis(teile, dauer, winkel, einzeln);
+    })['catch'](function(err){
       zeigeFehler('Die Erkennung ist gescheitert: ' + (err && err.message ? err.message : err) +
                   '. Ohne Netz gelingt der erste Lauf nicht, weil die Sprachdaten fehlen.');
     }).then(function(){
       laeuft = false;
       $('start').disabled = false;
       $('fortschritt').style.display = 'none';
+      schritt = '';
     });
-  });
+  }
 
-  /* ---------- Darstellung ---------- */
+  /* ================= Zeilen ================= */
 
   function sammleWoerter(data){
     if(data.words && data.words.length) return data.words;
     var raus = [];
-    (data.blocks || []).forEach(function(b){
-      (b.paragraphs || []).forEach(function(p){
-        (p.lines || []).forEach(function(l){
-          (l.words || []).forEach(function(w){ raus.push(w); });
+    (data.blocks||[]).forEach(function(bl){
+      (bl.paragraphs||[]).forEach(function(p){
+        (p.lines||[]).forEach(function(l){
+          (l.words||[]).forEach(function(w){ raus.push(w); });
         });
       });
     });
@@ -545,97 +766,352 @@
   }
 
   function zeilenBilden(woerter){
-    var gueltig = woerter.filter(function(w){ return w.bbox && (w.text || '').trim(); });
-    if(!gueltig.length) return [];
-    var hoehen = gueltig.map(function(w){ return w.bbox.y1 - w.bbox.y0; }).sort(function(a,b){ return a-b; });
-    var toleranz = Math.max(6, hoehen[Math.floor(hoehen.length/2)] * 0.6);
-    var sortiert = gueltig.slice().sort(function(a,b){
-      return (a.bbox.y0 + a.bbox.y1)/2 - (b.bbox.y0 + b.bbox.y1)/2;
-    });
     var zeilen = [];
+    var gueltig = woerter.filter(function(w){ return w.bbox && (w.text||'').trim(); });
+    zeilen.hoehe = 40;
+    if(!gueltig.length) return zeilen;
+    var hoehen = gueltig.map(function(w){ return w.bbox.y1-w.bbox.y0; }).sort(function(a,b){ return a-b; });
+    var hoehe = hoehen[Math.floor(hoehen.length/2)] || 10;
+    var tol = Math.max(6, hoehe*0.6);
+    var sortiert = gueltig.slice().sort(function(a,b){
+      return (a.bbox.y0+a.bbox.y1)/2 - (b.bbox.y0+b.bbox.y1)/2;
+    });
     sortiert.forEach(function(w){
-      var mitte = (w.bbox.y0 + w.bbox.y1) / 2;
-      var letzte = zeilen[zeilen.length - 1];
-      if(letzte && Math.abs(mitte - letzte.mitte) <= toleranz){
-        letzte.woerter.push(w);
-        letzte.summe += mitte;
-        letzte.mitte = letzte.summe / letzte.woerter.length;
+      var mitte = (w.bbox.y0+w.bbox.y1)/2;
+      var letzte = zeilen[zeilen.length-1];
+      if(letzte && Math.abs(mitte-letzte.mitte) <= tol){
+        letzte.woerter.push(w); letzte.summe += mitte;
+        letzte.mitte = letzte.summe/letzte.woerter.length;
       } else {
-        zeilen.push({ woerter:[w], mitte: mitte, summe: mitte });
+        zeilen.push({woerter:[w], mitte:mitte, summe:mitte});
       }
     });
     zeilen.forEach(function(z){
-      z.woerter.sort(function(a,b){ return a.bbox.x0 - b.bbox.x0; });
+      z.woerter.sort(function(a,b){ return a.bbox.x0-b.bbox.x0; });
+      z.text = z.woerter.map(function(w){ return w.text; }).join(' ');
+      var s = 0;
+      z.woerter.forEach(function(w){ s += (w.confidence||0); });
+      z.conf = s/z.woerter.length;
     });
+    zeilen.hoehe = hoehe;
     return zeilen;
   }
 
-  function zeigeErgebnis(data, dauer){
-    var woerter = sammleWoerter(data);
-    var zeilen = zeilenBilden(woerter);
+  /* ================= Nachbearbeitung ================= */
 
-    var summe = 0, schwach = 0;
-    woerter.forEach(function(w){
-      summe += (w.confidence || 0);
-      if((w.confidence || 0) < 75) schwach++;
-    });
+  function saeubern(t){
+    return (t||'')
+      .replace(/[|_;·"'‚„”“]/g,' ')
+      .replace(/\s+/g,' ')
+      .replace(/^[\s\-–.,:]+/,'')
+      .replace(/[\s.,:]+$/,'')
+      .trim();
+  }
 
-    $('zDauer').textContent   = dauer.toFixed(1);
-    $('zWoerter').textContent = woerter.length;
-    $('zSicher').textContent  = woerter.length ? Math.round(summe / woerter.length) + ' %' : '–';
-    $('zSchwach').textContent = schwach;
+  var ZU_ZIFFER = {'l':'1','I':'1','i':'1','|':'1','O':'0','o':'0','Q':'0','D':'0',
+    'S':'5','s':'5','B':'8','Z':'2','z':'2','G':'6','T':'7','g':'9','A':'4','b':'6'};
 
-    // Zeilenansicht
-    var ziel = $('zeilen');
-    ziel.innerHTML = '';
-    if(!zeilen.length){
-      ziel.innerHTML = '<p class="hinweis">Es wurde kein Text gefunden. Engeren Ausschnitt oder eine andere Bildaufbereitung versuchen.</p>';
+  var VERWECHSLUNG = {'4':['1','7'],'1':['4','7'],'7':['1','4'],'0':['8','6','9'],'8':['0','6','9'],
+    '6':['5','8','0'],'5':['6','8','3'],'9':['8','0','4'],'3':['8','5'],'2':['7','3']};
+
+  function nurNummer(t){
+    var raus = '', i, c;
+    t = (t||'');
+    for(i=0;i<t.length;i++){
+      c = t.charAt(i);
+      if(/[0-9\/]/.test(c)) raus += c;
+      else if(c === '-' || c === '–' || c === '—') raus += '-';
+      else if(ZU_ZIFFER[c]) raus += ZU_ZIFFER[c];
     }
-    zeilen.forEach(function(z, i){
-      var d = document.createElement('div');
-      d.className = 'zeile';
-      var nr = document.createElement('span');
-      nr.className = 'nr';
-      nr.textContent = (i + 1);
-      d.appendChild(nr);
-      var letztesEnde = null;
-      z.woerter.forEach(function(w){
-        if(letztesEnde !== null && (w.bbox.x0 - letztesEnde) > (w.bbox.y1 - w.bbox.y0) * 1.2){
-          var l = document.createElement('span');
-          l.className = 'luecke';
-          l.textContent = '|';
-          d.appendChild(l);
+    return raus;
+  }
+
+  function zerlege(t){
+    var m;
+    if((m = /^(\d+)-(\d+)$/.exec(t))) return {art:'-', a:parseInt(m[1],10), b:parseInt(m[2],10)};
+    if((m = /^(\d+)\/(\d+)$/.exec(t))) return {art:'/', a:parseInt(m[1],10), b:parseInt(m[2],10)};
+    if((m = /^(\d+)$/.exec(t))) return {art:'', a:parseInt(m[1],10), b:parseInt(m[1],10)};
+    return null;
+  }
+
+  function schreibe(z){
+    if(z.art === '/') return z.a + '/' + z.b;
+    if(z.a === z.b) return '' + z.a;
+    return z.a + '-' + z.b;
+  }
+
+  function varianten(text){
+    var raus = [text], i, j, ersatz;
+    for(i=0;i<text.length;i++){
+      ersatz = VERWECHSLUNG[text.charAt(i)];
+      if(!ersatz) continue;
+      for(j=0;j<ersatz.length;j++){
+        raus.push(text.substring(0,i) + ersatz[j] + text.substring(i+1));
+      }
+    }
+    return raus;
+  }
+
+  function nummerDeuten(roh, erwartet){
+    var t = nurNummer(roh);
+    var erg = {roh:roh, text:t || '—', geaendert:false, unklar:false, a:null, b:null};
+    var z = zerlege(t);
+
+    if(z && z.a === erwartet && z.b >= z.a){
+      erg.a = z.a; erg.b = z.b; erg.text = schreibe(z);
+      return erg;
+    }
+
+    if(/^\d{3,4}$/.test(t)){
+      for(var s=1; s<t.length-1; s++){
+        var links = parseInt(t.substring(0,s),10);
+        var rechts = parseInt(t.substring(s+1),10);
+        if(links === erwartet && rechts === erwartet+1){
+          erg.a = links; erg.b = rechts;
+          erg.text = links + '/' + rechts;
+          erg.geaendert = true;
+          return erg;
         }
-        var s = document.createElement('span');
-        var c = w.confidence || 0;
-        s.className = 'wort' + (c < 75 ? ' schwach' : (c < 90 ? ' mittel' : ''));
-        s.textContent = w.text;
-        s.title = Math.round(c) + ' %';
-        d.appendChild(s);
-        letztesEnde = w.bbox.x1;
-      });
-      ziel.appendChild(d);
+      }
+    }
+
+    var kandidaten = varianten(t), i, zz;
+    for(i=0;i<kandidaten.length;i++){
+      zz = zerlege(kandidaten[i]);
+      if(zz && zz.a === erwartet && zz.b >= zz.a && (zz.b - zz.a) < 12){
+        erg.a = zz.a; erg.b = zz.b;
+        erg.text = schreibe(zz);
+        erg.geaendert = (kandidaten[i] !== t);
+        return erg;
+      }
+    }
+
+    if(z){ erg.a = z.a; erg.b = Math.max(z.a, z.b); erg.text = schreibe(z); }
+    erg.unklar = true;
+    return erg;
+  }
+
+  function abstand(a, b){
+    a = a.toLowerCase(); b = b.toLowerCase();
+    var m = a.length, n = b.length, i, j;
+    if(!m) return n;
+    if(!n) return m;
+    var v0 = [], v1 = [];
+    for(j=0;j<=n;j++) v0[j] = j;
+    for(i=1;i<=m;i++){
+      v1[0] = i;
+      for(j=1;j<=n;j++){
+        var kosten = a.charAt(i-1) === b.charAt(j-1) ? 0 : 1;
+        v1[j] = Math.min(v1[j-1]+1, v0[j]+1, v0[j-1]+kosten);
+      }
+      for(j=0;j<=n;j++) v0[j] = v1[j];
+    }
+    return v0[n];
+  }
+
+  function besteWahl(wort, liste){
+    var w = saeubern(wort);
+    if(!w) return null;
+    var best = null, bestD = 999;
+    liste.forEach(function(k){
+      var d = abstand(w, k);
+      if(d < bestD){ bestD = d; best = k; }
+    });
+    if(!best) return null;
+    var grenze = Math.max(1, Math.floor(Math.max(w.length, best.length)/4));
+    return bestD <= grenze ? {wort:best, d:bestD} : null;
+  }
+
+  function textDeuten(roh, liste){
+    var t = saeubern(roh);
+    var erg = {roh:roh, text:'', geaendert:false, leer:false};
+    if(!t){ erg.leer = true; return erg; }
+
+    var sk = /stromkre/i.exec(t);
+    if(sk){
+      var zahlen = nurNummer(t.substring(sk.index));
+      erg.text = 'Stromkreis ' + zahlen.replace(/-/g,' - ');
+      erg.geaendert = (erg.text !== t);
+      return erg;
+    }
+
+    var teile = t.split('/');
+    var raus = [], fehl = false;
+    teile.forEach(function(teil){
+      var tr = saeubern(teil);
+      if(!tr) return;
+      var w = besteWahl(tr, liste);
+      if(w) raus.push(w.wort); else fehl = true;
     });
 
-    // Bild mit Kästen
+    if(raus.length && !fehl){
+      erg.text = raus.join(' / ');
+      erg.geaendert = (erg.text !== t);
+      return erg;
+    }
+    erg.leer = true;
+    return erg;
+  }
+
+  /* ================= Darstellung ================= */
+
+  function zeigeErgebnis(teile, dauer, winkel, einzeln){
+    var alle = [];
+    teile.forEach(function(t){
+      t.woerter = sammleWoerter(t.data);
+      t.zeilen = zeilenBilden(t.woerter);
+      alle = alle.concat(t.woerter);
+    });
+
+    var summe = 0;
+    alle.forEach(function(w){ summe += (w.confidence||0); });
+    $('zDauer').textContent   = dauer.toFixed(1);
+    $('zWoerter').textContent = alle.length;
+    $('zSicher').textContent  = alle.length ? Math.round(summe/alle.length) + ' %' : '–';
+    $('zWinkel').textContent  = winkel ? winkel.toFixed(2) + '°' : '0°';
+
+    var ziel = $('tabelle');
+    ziel.innerHTML = '';
+    if(!einzeln || teile.length < 3){
+      teile[0].zeilen.forEach(function(z){
+        var d = document.createElement('div');
+        d.style.padding = '7px 0';
+        d.style.borderTop = '1px solid #E2E4DC';
+        d.textContent = z.text;
+        ziel.appendChild(d);
+      });
+    } else {
+      ziel.appendChild(baueTabelle(teile));
+    }
+
     var k = $('kaesten');
     k.width = arbeit.width; k.height = arbeit.height;
     var x = k.getContext('2d');
     x.drawImage(arbeit, 0, 0);
-    x.lineWidth = Math.max(1, Math.round(arbeit.width / 700));
-    woerter.forEach(function(w){
-      if(!w.bbox) return;
-      var c = w.confidence || 0;
-      x.strokeStyle = c < 75 ? '#C0392B' : (c < 90 ? '#D98E0B' : '#7CA82C');
-      x.strokeRect(w.bbox.x0, w.bbox.y0, w.bbox.x1 - w.bbox.x0, w.bbox.y1 - w.bbox.y0);
+    x.lineWidth = Math.max(1, Math.round(arbeit.width/700));
+    teile.forEach(function(t){
+      var vx = einzeln ? (t.x0 - 10) : 0;
+      var vy = einzeln ? -10 : 0;
+      t.woerter.forEach(function(w){
+        if(!w.bbox) return;
+        var c = w.confidence||0;
+        x.strokeStyle = c < 75 ? '#C0392B' : (c < 90 ? '#D98E0B' : '#7CA82C');
+        x.strokeRect(w.bbox.x0+vx, w.bbox.y0+vy, w.bbox.x1-w.bbox.x0, w.bbox.y1-w.bbox.y0);
+      });
     });
+    if(einzeln){
+      x.strokeStyle = '#1E6FD9';
+      x.lineWidth = Math.max(2, Math.round(arbeit.width/500));
+      trenner.forEach(function(a){
+        var px = Math.round(arbeit.width*a);
+        x.beginPath(); x.moveTo(px, 0); x.lineTo(px, arbeit.height); x.stroke();
+      });
+    }
 
-    // Rohtext
-    $('roh').textContent = (data.text || '').trim() || '(leer)';
+    var rt = $('rohtexte');
+    rt.innerHTML = '';
+    letzteRohtexte = '';
+    teile.forEach(function(t){
+      var h = document.createElement('h3');
+      h.className = 'klein'; h.textContent = t.name;
+      var pre = document.createElement('pre');
+      pre.className = 'roh';
+      pre.textContent = (t.data.text||'').trim() || '(leer)';
+      rt.appendChild(h); rt.appendChild(pre);
+      letzteRohtexte += t.name + ':\n' + (t.data.text||'').trim() + '\n\n';
+    });
 
     $('ergebnis').style.display = 'block';
     $('ergebnis').scrollIntoView({behavior:'smooth', block:'start'});
   }
+
+  function baueTabelle(teile){
+    var nr = teile[0].zeilen, bez = teile[1].zeilen, ort = teile[2].zeilen;
+    var hoehe = nr.hoehe || bez.hoehe || 40;
+    var tol = hoehe * 1.1;
+    var nach = $('optNach').checked;
+    var benutztB = {}, benutztO = {};
+
+    function naechste(liste, mitte, benutzt){
+      var best = -1, bestD = Infinity, i, d;
+      for(i=0;i<liste.length;i++){
+        d = Math.abs(liste[i].mitte - mitte);
+        if(d < bestD){ bestD = d; best = i; }
+      }
+      if(best < 0 || bestD > tol) return null;
+      var doppelt = !!benutzt[best];
+      benutzt[best] = true;
+      return {zeile:liste[best], doppelt:doppelt};
+    }
+
+    var tab = document.createElement('table');
+    tab.className = 'erg';
+    tab.innerHTML = '<thead><tr><th>Nr.</th><th>Bezeichnung</th><th>Ort</th></tr></thead>';
+    var koerper = document.createElement('tbody');
+    var erwartet = 1;
+
+    nr.forEach(function(z){
+      var tr = document.createElement('tr');
+      var n = nach ? nummerDeuten(z.text, erwartet)
+                   : {text:saeubern(z.text)||'—', roh:z.text, geaendert:false, unklar:false, b:null};
+      if(n.b !== null && n.b !== undefined) erwartet = n.b + 1;
+      tr.appendChild(zelle(n.text, z.text, n.geaendert, n.unklar, false, 'nr'));
+
+      var paare = [[naechste(bez, z.mitte, benutztB), BEZEICHNUNGEN],
+                   [naechste(ort, z.mitte, benutztO), ORTE.concat(BEZEICHNUNGEN)]];
+      paare.forEach(function(p){
+        var tref = p[0];
+        if(!tref){ tr.appendChild(zelle('—', '', false, false, true, '')); return; }
+        var d = nach ? textDeuten(tref.zeile.text, p[1])
+                     : {text:saeubern(tref.zeile.text), roh:tref.zeile.text, geaendert:false, leer:false};
+        tr.appendChild(zelle(d.leer ? '—' : d.text, tref.zeile.text,
+                             d.geaendert, false, d.leer || tref.doppelt, ''));
+      });
+      koerper.appendChild(tr);
+    });
+
+    tab.appendChild(koerper);
+    var huelle = document.createElement('div');
+    huelle.appendChild(tab);
+
+    var rest = [];
+    bez.forEach(function(z,i){ if(!benutztB[i]) rest.push('Bezeichnung: ' + saeubern(z.text)); });
+    ort.forEach(function(z,i){ if(!benutztO[i]) rest.push('Ort: ' + saeubern(z.text)); });
+    if(rest.length){
+      var h = document.createElement('h3');
+      h.className = 'klein';
+      h.textContent = 'Keiner Nummer zugeordnet';
+      var ul = document.createElement('ul');
+      rest.forEach(function(r){
+        var li = document.createElement('li');
+        li.style.fontSize = '14px'; li.style.color = '#6B7065';
+        li.textContent = r;
+        ul.appendChild(li);
+      });
+      huelle.appendChild(h); huelle.appendChild(ul);
+    }
+    return huelle;
+  }
+
+  function zelle(text, roh, geaendert, unklar, leer, klasse){
+    var td = document.createElement('td');
+    if(klasse) td.className = klasse;
+    var s = document.createElement('span');
+    s.textContent = text;
+    if(geaendert) s.className = 'geaendert';
+    if(unklar) s.className = 'unklar';
+    if(leer) s.className = 'leer';
+    td.appendChild(s);
+    if(roh && saeubern(roh) !== text){
+      var r = document.createElement('span');
+      r.className = 'klein-roh';
+      r.textContent = 'gelesen: ' + roh;
+      td.appendChild(r);
+    }
+    return td;
+  }
+
+  /* ================= Reiter und Kleinkram ================= */
 
   Array.prototype.forEach.call(document.querySelectorAll('.reiter button'), function(b){
     b.addEventListener('click', function(){
@@ -649,9 +1125,8 @@
   });
 
   $('kopieren').addEventListener('click', function(){
-    var t = $('roh').textContent;
     if(navigator.clipboard){
-      navigator.clipboard.writeText(t).then(function(){
+      navigator.clipboard.writeText(letzteRohtexte).then(function(){
         $('kopieren').textContent = 'Kopiert';
         setTimeout(function(){ $('kopieren').textContent = 'Rohtext kopieren'; }, 1500);
       });
