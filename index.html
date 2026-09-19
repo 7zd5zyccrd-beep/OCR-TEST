@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   PaddleOCR-Test · Verteilerbeschreibung
-  v0.4 · 19.09.2026
+  v0.5 · 19.09.2026
 
   Etappe 2. Die Sonde v0.1 hat gezeigt, dass PaddleOCR im Browser läuft:
   auf dem iPhone mit WebGPU 1,5 s für das ganze Blatt, alle elf Stromkreis-
@@ -21,6 +21,11 @@
    4. Aufstiegsregel für die Nummern, Wortlisten für Bezeichnung und Ort.
       Fängt Fehllesungen wie "Obcrspanungschutz" ab.
    5. Modellwahl zum Vergleichen: tiny, small, lateinisch.
+
+  v0.5: Die Zuordnung Nummer <-> Spalteneintrag laeuft nicht mehr ueber den
+  naechstgelegenen Nachbarn, sondern ueber eine Zuordnung, die die Reihenfolge
+  einhaelt und Luecken zulaesst. Vorher hing "Stromkreis 5/6" an zwei Nummern
+  zugleich, waehrend der Ueberspannungsschutz uebrig blieb.
 
   v0.4 (aus den beiden iPhone-Läufen):
    6. Der Kopfschnitt fiel auf Buchstaben herein: "elektroDe witz" wurde über die
@@ -152,7 +157,7 @@
 
   <header>
     <h1>PaddleOCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.4 · 19.09.2026</span>
+    <span class="ver">v0.5 · 19.09.2026</span>
   </header>
 
   <div class="karte">
@@ -260,7 +265,7 @@ const MODELLE = {
   latin: {name:'v5 lateinisch',  konstante:'V5_LATIN_MOBILE_MODEL'}
 };
 
-const VERSION = 'v0.4 · 19.09.2026';
+const VERSION = 'v0.5 · 19.09.2026';
 
 /* ==================== Schrittliste ==================== */
 
@@ -992,6 +997,59 @@ function verarbeite(erg, arbeit, winkel, leseDauer){
 
 /* ==================== Tabelle bauen ==================== */
 
+/* Zuordnung Nummer <-> Spalteneintrag.
+
+   Vorher: zu jeder Nummer der Eintrag mit der geringsten Höhendifferenz, jede
+   Nummer für sich. Das erlaubte, denselben Eintrag zweimal zu nehmen, und die
+   Reihenfolge konnte kippen – "Stromkreis 5/6" hing an 13-15 UND an 16-19,
+   während der Überspannungsschutz übrig blieb.
+
+   Jetzt: beide Listen laufen von oben nach unten, also wird eine Zuordnung
+   gesucht, die die Reihenfolge einhält und Lücken zulässt. Gewählt wird die
+   mit der kleinsten Summe an Höhensprüngen; eine Lücke kostet einen festen
+   Aufschlag. Damit landet die fehlende Bezeichnung bei 16-19 dort, wo sie die
+   wenigsten Sprünge verursacht, statt alles Folgende zu verschieben. */
+function zuordnungFinden(nrZeilen, spalteZeilen, hoehe){
+  const N = nrZeilen.length, M = spalteZeilen.length;
+  const LUECKE = hoehe * 1.2;
+  const MAX = hoehe * 3;
+  const f = [], weg = [];
+  for(let i=0;i<=N;i++){
+    f.push(new Array(M+1).fill(Infinity));
+    weg.push(new Array(M+1).fill(null));
+  }
+  f[0][0] = 0;
+  for(let i=0;i<=N;i++){
+    for(let j=0;j<=M;j++){
+      const hier = f[i][j];
+      if(hier === Infinity) continue;
+      if(i < N && hier + LUECKE < f[i+1][j]){
+        f[i+1][j] = hier + LUECKE; weg[i+1][j] = ['zeile', i, j];
+      }
+      if(j < M && hier + LUECKE < f[i][j+1]){
+        f[i][j+1] = hier + LUECKE; weg[i][j+1] = ['eintrag', i, j];
+      }
+      if(i < N && j < M){
+        const d = Math.abs(nrZeilen[i].mitte - spalteZeilen[j].mitte);
+        if(d <= MAX && hier + d < f[i+1][j+1]){
+          f[i+1][j+1] = hier + d; weg[i+1][j+1] = ['paar', i, j];
+        }
+      }
+    }
+  }
+  const zu = new Array(N).fill(-1);
+  const frei = new Array(M).fill(true);
+  let i = N, j = M;
+  while(i > 0 || j > 0){
+    const s = weg[i][j];
+    if(!s) break;
+    if(s[0] === 'paar'){ zu[s[1]] = s[2]; frei[s[2]] = false; i--; j--; }
+    else if(s[0] === 'zeile'){ i--; }
+    else { j--; }
+  }
+  return {zu, frei};
+}
+
 function baueTabelle(teile, nach){
   const nr = teile[0].zeilen, bez = teile[1].zeilen, ort = teile[2].zeilen;
   const hoehe = nr.hoehe || bez.hoehe || 40;
@@ -999,16 +1057,14 @@ function baueTabelle(teile, nach){
   const benutztB = {}, benutztO = {};
   let text = '';
 
-  function naechste(liste, mitte, benutzt){
-    let best = -1, bestD = Infinity;
-    for(let i=0;i<liste.length;i++){
-      const d = Math.abs(liste[i].mitte - mitte);
-      if(d < bestD){ bestD = d; best = i; }
-    }
-    if(best < 0 || bestD > tol) return null;
-    const doppelt = !!benutzt[best];
-    benutzt[best] = true;
-    return {zeile: liste[best], doppelt};
+  const zuB = zuordnungFinden(nr, bez, hoehe);
+  const zuO = zuordnungFinden(nr, ort, hoehe);
+
+  function hole(liste, zuordnung, zi, benutzt){
+    const j = zuordnung.zu[zi];
+    if(j === undefined || j < 0) return null;
+    benutzt[j] = true;
+    return {zeile: liste[j], doppelt:false};
   }
 
   const tab = document.createElement('table');
@@ -1017,7 +1073,7 @@ function baueTabelle(teile, nach){
   const koerper = document.createElement('tbody');
   let erwartet = 1;
 
-  nr.forEach(z => {
+  nr.forEach((z, zi) => {
     const n = nach ? nummerDeuten(z.text, erwartet)
                    : {text: saeubern(z.text) || '—', roh:z.text, geaendert:false, unklar:false, luecke:0, b:null};
     if(n.luecke > 0){
@@ -1035,8 +1091,8 @@ function baueTabelle(teile, nach){
     if(n.b !== null && n.b !== undefined) erwartet = n.b + 1;
     tr.appendChild(zelle(n.text, z.text, n.geaendert, n.unklar, false, 'nr'));
 
-    const bezRef = naechste(bez, z.mitte, benutztB);
-    const ortRef = naechste(ort, z.mitte, benutztO);
+    const bezRef = hole(bez, zuB, zi, benutztB);
+    const ortRef = hole(ort, zuO, zi, benutztO);
     const leerD = () => ({text:'—', roh:'', geaendert:false, leer:true, unklar:false});
 
     let bezD = bezRef
@@ -1100,8 +1156,8 @@ function baueTabelle(teile, nach){
   huelle.appendChild(tab);
 
   const rest = [];
-  bez.forEach((z,i) => { if(!benutztB[i]) rest.push('Bezeichnung: ' + saeubern(z.text)); });
-  ort.forEach((z,i) => { if(!benutztO[i]) rest.push('Ort: ' + saeubern(z.text)); });
+  bez.forEach((z,i) => { if(zuB.frei[i] && !benutztB[i]) rest.push('Bezeichnung: ' + saeubern(z.text)); });
+  ort.forEach((z,i) => { if(zuO.frei[i] && !benutztO[i]) rest.push('Ort: ' + saeubern(z.text)); });
   if(rest.length){
     const h = document.createElement('h3');
     h.className = 'klein'; h.textContent = 'Keiner Nummer zugeordnet';
