@@ -1,7 +1,11 @@
 <!DOCTYPE html>
 <!--
   PaddleOCR-Test · Verteilerbeschreibung
-  v0.14 · 21.09.2026
+  v0.15 · 21.09.2026
+
+  v0.15: Fehlerbehebung an v0.14. "Cannot access 'r' before initialization" -
+  die neue Zeilennummer hiess r, und die Spaltenrolle in derselben Klammer
+  ebenfalls. Die Rolle heisst jetzt rolle.
 
   v0.14: die Tabelle kommt aus dem Raster statt aus der Nummernspalte.
 
@@ -371,7 +375,7 @@
 
   <header>
     <h1>PaddleOCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.14 · 21.09.2026</span>
+    <span class="ver">v0.15 · 21.09.2026</span>
   </header>
 
   <div class="karte">
@@ -497,7 +501,7 @@ const MODELLE = {
   latin: {name:'v5 lateinisch',  konstante:'V5_LATIN_MOBILE_MODEL'}
 };
 
-const VERSION = 'v0.14 · 21.09.2026';
+const VERSION = 'v0.15 · 21.09.2026';
 
 /* ==================== Schrittliste ==================== */
 
@@ -2500,9 +2504,11 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis){
       const j = gitter ? spalteNachZeile[i][r] : zuord[i].zu[zi];
       if(j === undefined || j < 0) return;
       benutzt[i][j] = true;
-      const r = rollen[i] || 'bezeichnung';
-      roh[r] = teile[i].zeilen[j].text;
-      restwert[r] = (zuord[i].rest && zuord[i].rest[j] !== undefined) ? zuord[i].rest[j] : 0;
+      /* hieß bis v0.14 ebenfalls r und kollidierte mit der Zeilennummer eine
+         Zeile darüber - dieselbe Klammer, dieselbe Bezeichnung */
+      const rolle = rollen[i] || 'bezeichnung';
+      roh[rolle] = teile[i].zeilen[j].text;
+      restwert[rolle] = (zuord[i].rest && zuord[i].rest[j] !== undefined) ? zuord[i].rest[j] : 0;
     });
 
     let bez = leerD(), ort = leerD(), sich = leerD();
