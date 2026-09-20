@@ -1,7 +1,52 @@
 <!DOCTYPE html>
 <!--
   PaddleOCR-Test · Verteilerbeschreibung
-  v0.9 · 19.09.2026
+  v0.10 · 20.09.2026
+
+  v0.10: Zeilenraster statt relativer Lage, und die Ernte als eigener Stand.
+
+  Das zweite, fremde Blatt hat den Grenzfall aus v0.9 an der Wirklichkeit
+  vorgefuehrt: dort ist nur das untere Fuenftel beschriftet, die acht
+  Bezeichnungen gehoeren in die Zeilen 36 bis 44. Die relative Lage streckt
+  ihre 312 Pixel ueber die 1979 Pixel der Nummernspalte und setzt sie auf
+  1, 6, 11, 16, 21, 27. Die Annahme "erster Eintrag gehoert zur ersten
+  Nummer" traegt eben nur, wenn die Spalte auch oben anfaengt.
+
+  Ebene 3 - das Zeilengesetz. Auf dem Papier sind alle Zeilen gleich hoch.
+  Schraeg fotografiert wird daraus keine lineare, sondern eine gebrochen-
+  lineare Folge: y(k) = (a*k + b) / (c*k + 1). Drei Unbekannte gegen 44
+  gelesene Nummern - hoffnungslos ueberbestimmt, und genau das macht es
+  robust. An Jeans Messwerten: mittlerer Restfehler 1,6 Pixel bei 46 Pixel
+  Zeilenhoehe, Zeilenhoehe oben 53 und unten 40. Das Gesetz liefert
+  ausserdem die Zeilen, die gar nicht gelesen wurden (45 bis 48).
+
+  Wie viele Zeilen zwischen zwei gelesenen Nummern liegen, sagen die
+  Abstaende. Ein fester Mittelwert reicht dafuer nicht - oben wuerde er eine
+  Zeile erfinden, unten eine verschlucken -, deshalb eine Ausgleichsgerade
+  durch die Abstaende. Danach werden die Schrittentscheidungen nachgebessert,
+  solange der Fit dadurch besser wird: ohne das laesst ein um 30 Pixel
+  verrutschter Wortkasten die Rechnung eine Zeile erfinden und verschiebt
+  alles Folgende.
+
+  Ebene 4 - Einhaengen. Nach dem Geradeziehen bleibt zwischen zwei Spalten
+  nur noch ein gleichmaessiges Kippen uebrig: ein Grundversatz und eine Drift
+  je Zeile. Gemessen wird um die Mitte der Spalte herum, sonst waechst der
+  Grundversatz einer Spalte, die nur unten steht, kuenstlich an. Eine
+  Verschiebung um GENAU eine Zeile kostet fast nichts - die Lehre aus v0.7 -,
+  deshalb ein kleiner Aufschlag auf Versatz und Drift: bei gleicher Guete
+  gewinnt die kleinste Korrektur. Am zweiten Blatt: Bezeichnungen auf 36-44,
+  Absicherungen auf 33-44, Restfehler hoechstens 0,14 Zeilen. Die Fusszeile
+  "seite1" faellt heraus, weil sie jenseits des Rasters liegt.
+
+  Die Ernte. Neue Trennlinie zwischen Erkennen und Deuten: welcher Text steht
+  in welcher Zeile und Spalte, sonst nichts. Keine Wortliste, keine Bedeutung.
+  Sie laesst sich sichern und ohne Foto wieder laden - damit wird die Deutung
+  zu Text rein, Text raus und ist in Sekunden gegen eine Sammlung echter
+  Blaetter zu pruefen, statt jedes Mal ein Foto durch die Engine zu schicken.
+
+  Unberuehrt in dieser Fassung: die Wortlisten und die Spaltenrollen. Dass
+  die rechte Spalte dieses Blattes keine Orte, sondern Absicherungen traegt
+  und die Wortliste sie deshalb loescht, ist Sache der naechsten Etappe.
 
   Etappe 2. Die Sonde v0.1 hat gezeigt, dass PaddleOCR im Browser läuft:
   auf dem iPhone mit WebGPU 1,5 s für das ganze Blatt, alle elf Stromkreis-
@@ -178,6 +223,18 @@
   .zaehlung{font-size:13px;color:var(--grau);margin:0 0 10px}
   .zaehlung.krumm{color:var(--bernstein);font-weight:600}
   .legende{font-size:13px;color:var(--grau);margin-top:12px}
+
+  table.ernte{width:100%;border-collapse:collapse;font-size:14px}
+  table.ernte th{text-align:left;font-size:12px;color:var(--grau);font-weight:600;padding:0 6px 6px 0}
+  table.ernte td{padding:5px 6px 5px 0;border-top:1px solid var(--linie);vertical-align:top}
+  table.ernte td.z{white-space:nowrap;font-weight:640;width:3.6em}
+  table.ernte td.sp{color:var(--grau);width:4.6em;font-size:13px}
+  table.ernte td.zahl{text-align:right;color:var(--grau);width:4.2em;font-size:13px;
+                      font-family:ui-monospace,Menlo,monospace;white-space:nowrap}
+  table.ernte tr.raus td{color:var(--grau);font-style:italic}
+  table.ernte td.warn{color:var(--bernstein);font-weight:600}
+  .gesetz{font-size:13px;color:var(--grau);margin:0 0 12px;line-height:1.5}
+  .gesetz b{color:var(--dunkel);font-weight:640}
 </style>
 </head>
 <body>
@@ -185,7 +242,7 @@
 
   <header>
     <h1>PaddleOCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.9 · 19.09.2026</span>
+    <span class="ver">v0.10 · 20.09.2026</span>
   </header>
 
   <div class="karte">
@@ -245,6 +302,7 @@
     </div>
     <div class="reiter" role="tablist">
       <button role="tab" aria-selected="true" data-tafel="tTabelle">Tabelle</button>
+      <button role="tab" aria-selected="false" data-tafel="tErnte">Ernte</button>
       <button role="tab" aria-selected="false" data-tafel="tBild">Bild</button>
       <button role="tab" aria-selected="false" data-tafel="tRoh">Rohtext</button>
     </div>
@@ -252,17 +310,32 @@
       <div id="tabelle"></div>
       <p class="legende">Grün heißt korrigiert, rot heißt unsicher oder bewusst leer gelassen. Darunter klein, was die Engine gelesen hat.</p>
     </div>
+    <div class="tafel" id="tErnte">
+      <div id="ernteKopf"></div>
+      <div id="ernteTabelle"></div>
+      <p class="legende">Die Ernte ist der Stand vor jeder Deutung: welcher Text in welcher Zeile und Spalte steht, sonst nichts. „Rest" ist der Abstand zur Zeilenmitte in Zeilenbruchteilen – alles unter 0,2 sitzt sicher, ab 0,35 wird es gelb.</p>
+    </div>
     <div class="tafel" id="tBild">
       <canvas id="leinwand"></canvas>
-      <p class="hinweis">Blau die gefundenen Spaltengrenzen, die Kästen nach Spalte eingefärbt. Verworfenes ist grau.</p>
+      <p class="hinweis">Blau die gefundenen Spaltengrenzen, die Kästen nach Spalte eingefärbt. Verworfenes ist grau. Bernstein waagerecht das Zeilenraster aus dem Zeilengesetz.</p>
     </div>
     <div class="tafel" id="tRoh">
       <div id="rohtexte"></div>
     </div>
     <div class="knopfreihe" style="margin-top:14px">
       <button class="still" id="kopieren">Alles kopieren</button>
+      <button class="still" id="ernteSichern">Ernte sichern</button>
       <button class="still" id="bildTeilen">Bild teilen</button>
     </div>
+  </div>
+
+  <div class="karte">
+    <h2>Gesicherte Ernte</h2>
+    <div class="knopfreihe">
+      <label class="knopf still" for="ernteDatei">Ernte laden</label>
+      <input type="file" id="ernteDatei" accept="application/json,.json">
+    </div>
+    <p class="hinweis" id="ernteinfo">Eine gesicherte Ernte lässt sich hier ohne Foto und ohne Engine wieder einlesen. Das Raster und die Zuordnung werden dabei neu gerechnet – so lässt sich an den Regeln schrauben, ohne jedes Mal ein Bild durch die Erkennung zu schicken.</p>
   </div>
 
   <div class="karte">
@@ -293,7 +366,7 @@ const MODELLE = {
   latin: {name:'v5 lateinisch',  konstante:'V5_LATIN_MOBILE_MODEL'}
 };
 
-const VERSION = 'v0.9 · 19.09.2026';
+const VERSION = 'v0.10 · 20.09.2026';
 
 /* ==================== Schrittliste ==================== */
 
@@ -578,6 +651,256 @@ function zuordnen(woerter, g0, g1){
   return gruppen;
 }
 
+/* ==================== Ebene 3: das Zeilengesetz ====================
+
+   Auf dem Papier sind alle Zeilen gleich hoch. Schräg fotografiert wird aus
+   gleichen Abständen keine lineare, sondern eine gebrochen-lineare Folge:
+
+        y(k) = (a*k + b) / (c*k + 1)
+
+   Drei Unbekannte gegen 44 gelesene Nummern - hoffnungslos überbestimmt, und
+   genau das macht es robust gegen einzelne Ausreißer. Das Gesetz liefert
+   danach zu jedem k eine Höhe und zu jeder Höhe ein k, auch für Zeilen, die
+   gar nicht gelesen wurden. */
+
+function loese3(A, b){
+  const M = [A[0].concat([b[0]]), A[1].concat([b[1]]), A[2].concat([b[2]])];
+  for(let i=0;i<3;i++){
+    let p = i;
+    for(let r=i+1;r<3;r++) if(Math.abs(M[r][i]) > Math.abs(M[p][i])) p = r;
+    if(Math.abs(M[p][i]) < 1e-12) return null;
+    const t = M[i]; M[i] = M[p]; M[p] = t;
+    for(let r=0;r<3;r++){
+      if(r === i) continue;
+      const f = M[r][i]/M[i][i];
+      for(let c=i;c<4;c++) M[r][c] -= f*M[i][c];
+    }
+  }
+  return [M[0][3]/M[0][0], M[1][3]/M[1][1], M[2][3]/M[2][2]];
+}
+
+function gesetzGerade(k, y){
+  const n = k.length;
+  if(n < 2) return null;
+  let sx=0, sy=0, sxx=0, sxy=0;
+  for(let i=0;i<n;i++){ sx+=k[i]; sy+=y[i]; sxx+=k[i]*k[i]; sxy+=k[i]*y[i]; }
+  const nen = n*sxx - sx*sx;
+  if(Math.abs(nen) < 1e-9) return null;
+  const a = (n*sxy - sx*sy)/nen;
+  return {a, b:(sy - a*sx)/n, c:0};
+}
+
+/* Gelöst wird die algebraische Form a*k + b - c*k*y = y. Die Gewichte
+   1/(c*k+1)^2 holen daraus wieder den senkrechten Abstand, zwei Runden
+   genügen. Liegt der Pol im Blatt, ist die Rechnung entgleist - dann lieber
+   die schlichte Gerade. */
+function gesetzFitten(k, y){
+  if(k.length < 4) return gesetzGerade(k, y);
+  let g = null;
+  let w = k.map(function(){ return 1; });
+  for(let runde=0; runde<3; runde++){
+    const A = [[0,0,0],[0,0,0],[0,0,0]], r = [0,0,0];
+    for(let i=0;i<k.length;i++){
+      const z = [k[i], 1, -k[i]*y[i]];
+      for(let a=0;a<3;a++){
+        for(let b=0;b<3;b++) A[a][b] += w[i]*z[a]*z[b];
+        r[a] += w[i]*z[a]*y[i];
+      }
+    }
+    const s = loese3(A, r);
+    if(!s) return g || gesetzGerade(k, y);
+    g = {a:s[0], b:s[1], c:s[2]};
+    w = k.map(ki => 1/Math.max(1e-6, (g.c*ki + 1)*(g.c*ki + 1)));
+  }
+  const kmax = k[k.length-1];
+  if(!isFinite(g.a) || !isFinite(g.b) || !isFinite(g.c)) return gesetzGerade(k, y);
+  if(Math.abs(g.c*kmax + 1) < 0.2 || Math.abs(g.c*k[0] + 1) < 0.2) return gesetzGerade(k, y);
+  return g;
+}
+
+function yVon(g, k){
+  if(!g) return null;
+  const n = g.c*k + 1;
+  return Math.abs(n) < 1e-9 ? null : (g.a*k + g.b)/n;
+}
+function kVon(g, y){
+  if(!g) return null;
+  const n = g.a - g.c*y;
+  return Math.abs(n) < 1e-9 ? null : (y - g.b)/n;
+}
+
+function gesetzGuete(k, y){
+  const g = gesetzFitten(k, y);
+  if(!g) return {g:null, mittel:1e9, max:1e9};
+  let s = 0, max = 0;
+  for(let i=0;i<k.length;i++){
+    const h = yVon(g, k[i]);
+    if(h === null) return {g:null, mittel:1e9, max:1e9};
+    const d = Math.abs(h - y[i]);
+    s += d; if(d > max) max = d;
+  }
+  return {g, mittel:s/k.length, max};
+}
+
+/* Wie viele Zeilen liegen zwischen zwei gelesenen Nummern? Die Abstände
+   sagen es - aber ein fester Mittelwert reicht nicht: auf Jeans Blatt laufen
+   sie von 56 Pixel oben auf 37 unten. Mit einem Mittelwert von 46 würde oben
+   eine Zeile erfunden und unten eine verschluckt. Also eine Ausgleichsgerade
+   durch die Abstände, und für sie zählen nur Schritte, die nach einem
+   einzelnen aussehen. */
+function ordinaleSchaetzen(y){
+  const m = y.length;
+  if(m < 2) return y.map(function(_, i){ return i; });
+  const d = [];
+  for(let i=1;i<m;i++) d.push(y[i]-y[i-1]);
+  let p = median(d), q = 0;
+  for(let runde=0; runde<4; runde++){
+    const xs=[], ys=[];
+    d.forEach(function(v, i){
+      const e = p + q*i;
+      if(e > 0 && v < e*1.6){ xs.push(i); ys.push(v); }
+    });
+    if(xs.length < 2) break;
+    const n = xs.length;
+    let sx=0, sy=0, sxx=0, sxy=0;
+    for(let i=0;i<n;i++){ sx+=xs[i]; sy+=ys[i]; sxx+=xs[i]*xs[i]; sxy+=xs[i]*ys[i]; }
+    const nen = n*sxx - sx*sx;
+    if(Math.abs(nen) < 1e-9) break;
+    q = (n*sxy - sx*sy)/nen;
+    p = (sy - q*sx)/n;
+  }
+  const k = [0];
+  for(let i=0;i<d.length;i++){
+    const e = Math.max(1, p + q*i);
+    k.push(k[k.length-1] + Math.max(1, Math.min(6, Math.round(d[i]/e))));
+  }
+  return k;
+}
+
+/* Ein um 30 Pixel verrutschter Wortkasten lässt die Schätzung oben eine
+   Zeile erfinden, und alles Folgende sitzt eine Nummer zu tief. Deshalb
+   werden die Schrittentscheidungen nachgebessert, solange der Fit dadurch
+   besser wird - das fängt erfundene wie übersehene Zeilen gleichermaßen. */
+function ordinaleVerfeinern(y, k){
+  let beste = k.slice(), wert = gesetzGuete(beste, y);
+  for(let runde=0; runde<6; runde++){
+    let besser = false;
+    for(let i=0;i<beste.length-1;i++){
+      for(let dz=-1; dz<=1; dz+=2){
+        if(beste[i+1]-beste[i]+dz < 1) continue;
+        const probe = beste.slice(0, i+1).concat(beste.slice(i+1).map(v => v+dz));
+        const w = gesetzGuete(probe, y);
+        if(w.g && w.mittel < wert.mittel - 1e-9){ beste = probe; wert = w; besser = true; }
+      }
+    }
+    if(!besser) break;
+  }
+  return {k:beste, g:wert.g, mittel:wert.mittel, max:wert.max};
+}
+
+function rasterBauen(nrZeilen){
+  if(!nrZeilen || nrZeilen.length < 3) return null;
+  const y = nrZeilen.map(z => z.mitte);
+  const v = ordinaleVerfeinern(y, ordinaleSchaetzen(y));
+  if(!v.g) return null;
+  const von = v.k[0], bis = v.k[v.k.length-1];
+  const mitte = v.k[Math.floor(v.k.length/2)];
+  const hoehe = Math.abs(yVon(v.g, mitte+1) - yVon(v.g, mitte));
+  if(!(hoehe > 2) || !isFinite(hoehe)) return null;
+  const fehlend = [];
+  for(let i=von; i<=bis; i++) if(v.k.indexOf(i) < 0) fehlend.push(i+1);
+  return {
+    gesetz: v.g, k: v.k, von, bis, hoehe,
+    mittel: v.mittel, max: v.max, punkte: v.k.length, fehlend,
+    hoeheOben: Math.abs(yVon(v.g, von+1) - yVon(v.g, von)),
+    hoeheUnten: Math.abs(yVon(v.g, bis) - yVon(v.g, bis-1))
+  };
+}
+
+/* ==================== Ebene 4: Spalten einhängen ====================
+
+   Nach dem Geradeziehen bleibt zwischen zwei Spalten nur noch ein
+   gleichmäßiges Kippen übrig: ein Grundversatz und eine Drift je Zeile. Auf
+   dem zweiten Blatt wandert der Versatz zwischen Nummern- und
+   Absicherungsspalte über zwölf Zeilen von +25 auf -11 Pixel - fast eine
+   ganze Zeilenhöhe, und deshalb nicht zu ignorieren.
+
+   Gemessen wird um die Mitte der Spalte herum. Sonst wächst der Grundversatz
+   einer Spalte, die nur unten steht, künstlich an, obwohl sie bei sich
+   zuhause bündig sitzt.
+
+   Eine Verschiebung um GENAU eine Zeile kostet fast nichts - die teure Lehre
+   aus v0.7 -, deshalb ein kleiner Aufschlag auf Versatz und Drift: bei
+   gleicher Güte gewinnt die kleinste Korrektur. Auf dem Papier stehen Nummer
+   und Absicherung schließlich auf derselben Linie. */
+function spalteEinhaengen(raster, zeilen){
+  const g = raster.gesetz, h = raster.hoehe;
+  const y = zeilen.map(z => z.mitte);
+  if(!y.length) return {p:0, q:0, kosten:0, ks:[]};
+  const roh = y.map(v => kVon(g, v));
+  if(roh.some(v => v === null || !isFinite(v))) return {p:0, q:0, kosten:0, ks:roh.map(()=>0)};
+  const kMitte = roh.reduce((s,v)=>s+v, 0)/roh.length;
+  let best = null;
+  for(let ip=-21; ip<=21; ip++){
+    const p = ip*(h/14);
+    for(let iq=-20; iq<=20; iq++){
+      const q = iq*(h*0.01);
+      let kosten = 0, klein = Infinity, gross = -Infinity, schlecht = false;
+      const ks = [], belegt = {};
+      for(let i=0;i<y.length;i++){
+        let kk = roh[i];
+        for(let t=0;t<2;t++){
+          kk = kVon(g, y[i] - (p + q*(kk - kMitte)));
+          if(kk === null || !isFinite(kk)){ schlecht = true; break; }
+        }
+        if(schlecht) break;
+        ks.push(kk);
+        if(kk < klein) klein = kk;
+        if(kk > gross) gross = kk;
+        kosten += Math.min(Math.abs(kk - Math.round(kk)), 0.5);
+        const z = Math.round(kk);
+        belegt[z] = (belegt[z] || 0) + 1;
+        if(z < raster.von - 1 || z > raster.bis + 5) kosten += 0.5;
+      }
+      if(schlecht) continue;
+      Object.keys(belegt).forEach(function(z){ if(belegt[z] > 1) kosten += 0.5*(belegt[z]-1); });
+      kosten = kosten/y.length + 0.05*Math.abs(p)/h + 0.05*Math.abs(q)*(gross-klein)/h;
+      if(!best || kosten < best.kosten) best = {p, q, kosten, ks};
+    }
+  }
+  return best || {p:0, q:0, kosten:0, ks:roh};
+}
+
+/* Liefert dieselbe Form wie zuordnungFinden, damit die Tabelle unverändert
+   damit arbeiten kann: zu[Nummernzeile] = Index in der Spalte, frei[] für
+   das, was übrig bleibt. Dazu die Messwerte für den Ernte-Reiter. */
+function zuordnungRaster(raster, nrZeilen, spalteZeilen){
+  const N = nrZeilen.length, M = spalteZeilen.length;
+  const zu = new Array(N).fill(-1), frei = new Array(M).fill(true);
+  const zeile = new Array(M).fill(null), rest = new Array(M).fill(0);
+  if(!M || !N) return {zu, frei, kosten:0, p:0, q:0, zeile, rest, versatz:0};
+  const e = spalteEinhaengen(raster, spalteZeilen);
+  const wahl = {};
+  for(let j=0;j<M;j++){
+    const kk = e.ks[j];
+    if(kk === undefined || kk === null || !isFinite(kk)) continue;
+    const z = Math.round(kk);
+    rest[j] = kk - z;
+    /* Jenseits des Rasters liegt die Fußzeile des Blattes, nicht die Tabelle. */
+    if(z < raster.von - 1 || z > raster.bis + 5) continue;
+    const alt = wahl[z];
+    if(alt === undefined || Math.abs(rest[j]) < Math.abs(rest[alt])){
+      if(alt !== undefined) zeile[alt] = null;
+      wahl[z] = j; zeile[j] = z;
+    }
+  }
+  for(let zi=0; zi<N; zi++){
+    const j = wahl[raster.k[zi]];
+    if(j !== undefined){ zu[zi] = j; frei[j] = false; }
+  }
+  return {zu, frei, kosten:e.kosten, p:e.p, q:e.q, zeile, rest, versatz:0};
+}
+
 /* ==================== Nachbearbeitung ==================== */
 
 function saeubern(t){
@@ -783,6 +1106,7 @@ function textDeuten(roh, liste){
 
 let quelle = null;         /* Canvas mit dem entzerrten Bild */
 let letzteAusgabe = '';
+let letzterDateiname = '';
 const leinwand = document.getElementById('leinwand');
 
 document.getElementById('datei').addEventListener('change', async function(e){
@@ -809,6 +1133,7 @@ document.getElementById('datei').addEventListener('change', async function(e){
     ctx.drawImage(bm, 0, 0, c.width, c.height);
     if(bm.close) bm.close();
     quelle = c;
+    letzterDateiname = datei.name || '';
     document.getElementById('fotoinfo').textContent =
       c.width + ' × ' + c.height + ' Bildpunkte, ' + Math.round(datei.size/1024) + ' KB';
     setze('foto','gut','', jetzt()-t0);
@@ -943,6 +1268,7 @@ function verarbeite(erg, arbeit, winkel, leseDauer){
   ziel.innerHTML = '';
   let tabellenText = '';
   let messText = '';
+  let raster = null;
   if(gruppen){
     const teile = [
       {name:'Nummer',      zeilen: zeilenBilden(gruppen[0])},
@@ -963,12 +1289,26 @@ function verarbeite(erg, arbeit, winkel, leseDauer){
       for(let i=1;i<nrZ.length;i++) abstaende.push(Math.round(nrZ[i].mitte - nrZ[i-1].mitte));
       mess.push('Abstände in der Nummernspalte: ' + abstaende.join(', '));
     }
-    messText = mess.join('\n');
 
-    const gebaut = baueTabelle(teile, nach);
+    /* Ebene 3: das Zeilengesetz aus der Nummernspalte. */
+    raster = rasterBauen(nrZ);
+
+    const gebaut = baueTabelle(teile, nach, raster);
     ziel.appendChild(gebaut.knoten);
     tabellenText = gebaut.text;
+
+    const ernte = ernteBauen(teile, raster, gebaut.zuB, gebaut.zuO, {
+      breite: arbeit.width, hoehe: arbeit.height, winkel,
+      modell: MODELLE[aktivesModell] ? MODELLE[aktivesModell].name : aktivesModell,
+      schwelle: document.getElementById('schwelle').value,
+      grenzen, datei: letzterDateiname
+    });
+    ernteAnzeigen(ernte, null);
+    mess.push('');
+    mess.push(ernteText(ernte));
+    messText = mess.join('\n');
   } else {
+    ernteAnzeigen(null, null);
     const hw = document.createElement('p');
     hw.className = 'zaehlung krumm';
     hw.textContent = spalten ? 'Die Spalten ließen sich nicht finden – hier die Zeilen, wie sie kamen.'
@@ -988,6 +1328,24 @@ function verarbeite(erg, arbeit, winkel, leseDauer){
   leinwand.width = arbeit.width; leinwand.height = arbeit.height;
   const x = leinwand.getContext('2d');
   x.drawImage(arbeit, 0, 0);
+
+  /* Das Zeilenraster zuerst, damit die Wortkästen darüber liegen. Gezeichnet
+     werden die Zeilengrenzen, also k + 0,5 - zwischen den Zeilen, nicht auf
+     ihnen. Fünf Zeilen über den letzten gelesenen hinaus, weil das Gesetz
+     auch dort noch trägt. */
+  if(raster){
+    x.save();
+    x.strokeStyle = '#D98E0B';
+    x.globalAlpha = 0.5;
+    x.lineWidth = Math.max(1, Math.round(arbeit.width/1500));
+    for(let k = raster.von - 2; k <= raster.bis + 5; k++){
+      const yy = yVon(raster.gesetz, k + 0.5);
+      if(yy === null || !isFinite(yy) || yy < 0 || yy > arbeit.height) continue;
+      x.beginPath(); x.moveTo(0, yy); x.lineTo(arbeit.width, yy); x.stroke();
+    }
+    x.restore();
+  }
+
   x.lineWidth = Math.max(1, Math.round(arbeit.width/700));
   const farben = ['#C0392B','#7CA82C','#1E6FD9'];
   alle.forEach(w => {
@@ -1027,7 +1385,7 @@ function verarbeite(erg, arbeit, winkel, leseDauer){
              'Fassung: ' + VERSION;
 
   [['Rohtext der Engine', roh], ['Tabelle', tabellenText.trim()],
-   ['Messwerte der Spalten', messText], ['Kennzahlen', kz]].forEach(([titel, inhalt]) => {
+   ['Messwerte, Raster und Ernte', messText], ['Kennzahlen', kz]].forEach(([titel, inhalt]) => {
     const h = document.createElement('h3');
     h.className = 'klein'; h.textContent = titel;
     const pre = document.createElement('pre');
@@ -1037,9 +1395,226 @@ function verarbeite(erg, arbeit, winkel, leseDauer){
 
   letzteAusgabe = umgebungText + '\n\n--- Rohtext ---\n' + roh +
                   '\n\n--- Tabelle ---\n' + tabellenText.trim() +
-                  '\n\n--- Messwerte ---\n' + messText + '\n\n' + kz;
+                  '\n\n--- Messwerte, Raster und Ernte ---\n' + messText + '\n\n' + kz;
 
   document.getElementById('ergebnis').style.display = 'block';
+}
+
+/* ==================== Die Ernte ====================
+
+   Die Trennlinie zwischen Erkennen und Deuten. Die Ernte sagt: dieser Text
+   steht in dieser Zeile, in dieser Spalte, so sicher gelesen, so weit von der
+   Zeilenmitte entfernt. Sonst nichts - keine Wortliste, keine Bedeutung,
+   keine Spaltenrolle.
+
+   Gesichert und wieder geladen wird die Deutung damit zu Text rein, Text
+   raus: an den Regeln lässt sich schrauben, ohne jedes Mal ein Foto durch die
+   Engine zu schicken. Das spart Zeit, und es macht die Prüfung gegen eine
+   Sammlung echter Blätter überhaupt erst bezahlbar. */
+
+const LAGEN = ['links','mitte','rechts'];
+let letzteErnte = null;
+
+function spanne(zl, welche){
+  if(!zl.woerter || !zl.woerter.length) return null;
+  let v = welche === 'x0' ? Infinity : -Infinity;
+  zl.woerter.forEach(function(w){
+    if(!w.bbox) return;
+    if(welche === 'x0') v = Math.min(v, w.bbox.x0);
+    else v = Math.max(v, w.bbox.x1);
+  });
+  return isFinite(v) ? Math.round(v) : null;
+}
+
+function ernteBauen(teile, raster, zuB, zuO, meta){
+  const spalten = [], zellen = [];
+  const quellen = [null, zuB, zuO];
+  teile.forEach(function(t, si){
+    const z = quellen[si];
+    const hatRaster = raster && z && z.zeile;
+    spalten.push({
+      nr: si,
+      lage: LAGEN[si] || ('spalte' + si),
+      anker: si === 0,
+      von: si === 0 ? 0 : (meta.grenzen ? Math.round(meta.grenzen[si-1]) : null),
+      bis: si === 2 ? meta.breite : (meta.grenzen ? Math.round(meta.grenzen[si]) : null),
+      versatz: hatRaster ? Math.round(z.p) : 0,
+      drift: hatRaster ? Math.round(z.q*100)/100 : 0,
+      kosten: hatRaster ? Math.round(z.kosten*1000)/1000 : null,
+      eintraege: t.zeilen.length
+    });
+    t.zeilen.forEach(function(zl, j){
+      let zeileNr = null, rest = 0;
+      if(si === 0){
+        zeileNr = raster ? raster.k[j] + 1 : j + 1;
+      } else if(hatRaster){
+        zeileNr = (z.zeile[j] === null || z.zeile[j] === undefined) ? null : z.zeile[j] + 1;
+        rest = Math.round(z.rest[j]*100)/100;
+      } else {
+        const j2 = z ? z.zu.indexOf(j) : -1;
+        zeileNr = j2 >= 0 ? j2 + 1 : null;
+      }
+      zellen.push({
+        zeile: zeileNr, spalte: si, roh: zl.text,
+        sicherheit: Math.round(zl.conf || 0),
+        y: Math.round(zl.mitte),
+        x0: spanne(zl, 'x0'), x1: spanne(zl, 'x1'),
+        rest
+      });
+    });
+  });
+  zellen.sort(function(a, b){
+    if(a.zeile === null && b.zeile !== null) return 1;
+    if(b.zeile === null && a.zeile !== null) return -1;
+    if(a.zeile !== b.zeile) return (a.zeile||0) - (b.zeile||0);
+    return a.spalte - b.spalte;
+  });
+  return {
+    art: 'zellenernte', fassung: 1, app: VERSION,
+    erzeugt: new Date().toISOString(),
+    quelle: {
+      breite: meta.breite, hoehe: meta.hoehe,
+      schraeglage: meta.winkel ? Math.round(meta.winkel*100)/100 : 0,
+      modell: meta.modell || '', schwelle: meta.schwelle,
+      datei: meta.datei || ''
+    },
+    raster: raster ? {
+      a: raster.gesetz.a, b: raster.gesetz.b, c: raster.gesetz.c,
+      ersteZeile: 1, letzteZeile: raster.bis - raster.von + 1,
+      punkte: raster.punkte,
+      hoeheOben: Math.round(raster.hoeheOben*10)/10,
+      hoeheUnten: Math.round(raster.hoeheUnten*10)/10,
+      restfehler: Math.round(raster.mittel*10)/10,
+      restfehlerMax: Math.round(raster.max*10)/10,
+      fehlendeZeilen: raster.fehlend
+    } : null,
+    spalten, zellen
+  };
+}
+
+function ernteText(e){
+  if(!e) return '';
+  const zeilen = [];
+  if(e.raster){
+    zeilen.push('Zeilenraster: ' + e.raster.punkte + ' Nummern auf Zeile ' +
+      e.raster.ersteZeile + ' bis ' + e.raster.letzteZeile +
+      ', Zeilenhöhe oben ' + e.raster.hoeheOben + ' / unten ' + e.raster.hoeheUnten +
+      ', Restfehler ' + e.raster.restfehler + ' px (höchstens ' + e.raster.restfehlerMax + ')');
+    if(e.raster.fehlendeZeilen && e.raster.fehlendeZeilen.length)
+      zeilen.push('Nicht gelesene Zeilen im Raster: ' + e.raster.fehlendeZeilen.join(', '));
+  } else {
+    zeilen.push('Zeilenraster: nicht zustande gekommen');
+  }
+  e.spalten.forEach(function(s){
+    if(s.anker){ zeilen.push('Spalte ' + s.lage + ' (Anker): ' + s.eintraege + ' Einträge'); return; }
+    zeilen.push('Spalte ' + s.lage + ': ' + s.eintraege + ' Einträge, Versatz ' +
+      (s.versatz >= 0 ? '+' : '') + s.versatz + ' px, Drift ' +
+      (s.drift >= 0 ? '+' : '') + s.drift + ' px/Zeile' +
+      (s.kosten === null ? '' : ', Kosten ' + s.kosten));
+  });
+  e.zellen.forEach(function(c){
+    zeilen.push((c.zeile === null ? '  –' : String(c.zeile)).padStart(4) + ' | ' +
+      LAGEN[c.spalte] + ' | ' + c.roh +
+      (c.zeile === null ? '  (außerhalb des Rasters)' : '  (Rest ' + c.rest + ')'));
+  });
+  return zeilen.join('\n');
+}
+
+function ernteAnzeigen(e, herkunft){
+  letzteErnte = e;
+  const kopf = document.getElementById('ernteKopf');
+  const ziel = document.getElementById('ernteTabelle');
+  kopf.innerHTML = ''; ziel.innerHTML = '';
+  if(!e) return;
+
+  const p = document.createElement('p');
+  p.className = 'gesetz';
+  const teile = [];
+  if(e.raster){
+    teile.push('<b>Zeilengesetz</b> aus ' + e.raster.punkte + ' Nummern, Zeile ' +
+      e.raster.ersteZeile + ' bis ' + e.raster.letzteZeile +
+      '. Zeilenhöhe oben <b>' + e.raster.hoeheOben + '</b>, unten <b>' + e.raster.hoeheUnten +
+      '</b> Pixel, Restfehler <b>' + e.raster.restfehler + ' px</b> (höchstens ' +
+      e.raster.restfehlerMax + ').');
+    if(e.raster.fehlendeZeilen && e.raster.fehlendeZeilen.length)
+      teile.push('Im Raster, aber nicht gelesen: Zeile ' + e.raster.fehlendeZeilen.join(', ') + '.');
+  } else {
+    teile.push('<b>Kein Zeilengesetz</b> – zu wenige Nummern. Die Zuordnung lief über die relative Lage wie in v0.9.');
+  }
+  e.spalten.forEach(function(s){
+    if(s.anker) return;
+    teile.push('Spalte <b>' + s.lage + '</b>: Versatz ' + (s.versatz>=0?'+':'') + s.versatz +
+      ' px, Drift ' + (s.drift>=0?'+':'') + s.drift + ' px je Zeile' +
+      (s.kosten === null ? '' : ', Kosten ' + s.kosten) + '.');
+  });
+  if(herkunft) teile.push(herkunft);
+  p.innerHTML = teile.join('<br>');
+  kopf.appendChild(p);
+
+  const tab = document.createElement('table');
+  tab.className = 'ernte';
+  tab.innerHTML = '<thead><tr><th>Zeile</th><th>Spalte</th><th>gelesen</th><th>Sich.</th><th>Rest</th></tr></thead>';
+  const koerper = document.createElement('tbody');
+  e.zellen.forEach(function(c){
+    const tr = document.createElement('tr');
+    if(c.zeile === null) tr.className = 'raus';
+    const z = document.createElement('td');
+    z.className = 'z';
+    z.textContent = c.zeile === null ? '–' : c.zeile;
+    const sp = document.createElement('td');
+    sp.className = 'sp';
+    sp.textContent = LAGEN[c.spalte] || c.spalte;
+    const t = document.createElement('td');
+    t.textContent = c.roh;
+    const si = document.createElement('td');
+    si.className = 'zahl';
+    si.textContent = c.sicherheit + ' %';
+    const r = document.createElement('td');
+    r.className = 'zahl';
+    if(c.zeile === null) r.textContent = 'außerhalb';
+    else {
+      r.textContent = (c.rest >= 0 ? '+' : '') + c.rest.toFixed(2);
+      if(Math.abs(c.rest) >= 0.35) r.className += ' warn';
+    }
+    [z, sp, t, si, r].forEach(function(td){ tr.appendChild(td); });
+    koerper.appendChild(tr);
+  });
+  tab.appendChild(koerper);
+  ziel.appendChild(tab);
+}
+
+/* Aus einer gesicherten Ernte wieder die Form bauen, mit der die Tabelle
+   arbeitet. Das Raster wird dabei NEU gerechnet, nicht aus der Datei
+   übernommen - sonst prüfen wir die Rechnung nie wieder. */
+function teileAusErnte(e){
+  const teile = [
+    {name:'Nummer',      zeilen: []},
+    {name:'Bezeichnung', zeilen: []},
+    {name:'Ort',         zeilen: []}
+  ];
+  (e.zellen || []).forEach(function(c){
+    const t = teile[c.spalte];
+    if(!t) return;
+    t.zeilen.push({
+      mitte: c.y, text: c.roh, conf: c.sicherheit,
+      woerter: (c.x0 === null || c.x0 === undefined) ? []
+             : [{bbox:{x0:c.x0, y0:c.y, x1:c.x1, y1:c.y}, text:c.roh}]
+    });
+  });
+  teile.forEach(function(t){
+    t.zeilen.sort(function(a,b){ return a.mitte - b.mitte; });
+    const d = [];
+    for(let i=1;i<t.zeilen.length;i++) d.push(t.zeilen[i].mitte - t.zeilen[i-1].mitte);
+    t.zeilen.hoehe = d.length ? median(d) : 40;
+  });
+  return teile;
+}
+
+function ernteDateiname(){
+  const d = new Date();
+  const zwei = n => (n<10?'0':'') + n;
+  return 'ernte-' + d.getFullYear() + zwei(d.getMonth()+1) + zwei(d.getDate()) +
+         '-' + zwei(d.getHours()) + zwei(d.getMinutes()) + '.json';
 }
 
 /* ==================== Tabelle bauen ==================== */
@@ -1176,15 +1751,16 @@ function zuordnungFinden(nrZeilen, spalteZeilen, hoehe){
   return {zu, frei, kosten:f[N][M], versatz:0};
 }
 
-function baueTabelle(teile, nach){
+function baueTabelle(teile, nach, raster){
   const nr = teile[0].zeilen, bez = teile[1].zeilen, ort = teile[2].zeilen;
-  const hoehe = nr.hoehe || bez.hoehe || 40;
-  const tol = hoehe * 1.1;
+  const hoehe = (raster && raster.hoehe) || nr.hoehe || bez.hoehe || 40;
   const benutztB = {}, benutztO = {};
   let text = '';
 
-  const zuB = zuordnungFinden(nr, bez, hoehe);
-  const zuO = zuordnungFinden(nr, ort, hoehe);
+  /* Mit Raster über das Zeilengesetz, ohne Raster wie in v0.9 über die
+     relative Lage - besser als gar keine Tabelle. */
+  const zuB = raster ? zuordnungRaster(raster, nr, bez) : zuordnungFinden(nr, bez, hoehe);
+  const zuO = raster ? zuordnungRaster(raster, nr, ort) : zuordnungFinden(nr, ort, hoehe);
 
   function hole(liste, zuordnung, zi, benutzt){
     const j = zuordnung.zu[zi];
@@ -1297,7 +1873,7 @@ function baueTabelle(teile, nach){
     huelle.appendChild(h); huelle.appendChild(ul);
     text += 'Keiner Nummer zugeordnet: ' + rest.join('; ') + '\n';
   }
-  return {knoten: huelle, text};
+  return {knoten: huelle, text, zuB, zuO};
 }
 
 function zelle(text, roh, geaendert, unklar, leer, klasse){
@@ -1320,13 +1896,15 @@ function zelle(text, roh, geaendert, unklar, leer, klasse){
 
 /* ==================== Reiter, Kopieren, Teilen ==================== */
 
+function zeigeTafel(id){
+  Array.prototype.forEach.call(document.querySelectorAll('.reiter button'),
+    o => o.setAttribute('aria-selected', o.dataset.tafel === id ? 'true' : 'false'));
+  Array.prototype.forEach.call(document.querySelectorAll('.tafel'),
+    t => t.classList.toggle('an', t.id === id));
+}
+
 Array.prototype.forEach.call(document.querySelectorAll('.reiter button'), b => {
-  b.addEventListener('click', () => {
-    Array.prototype.forEach.call(document.querySelectorAll('.reiter button'),
-      o => o.setAttribute('aria-selected', o === b ? 'true' : 'false'));
-    Array.prototype.forEach.call(document.querySelectorAll('.tafel'),
-      t => t.classList.toggle('an', t.id === b.dataset.tafel));
-  });
+  b.addEventListener('click', () => zeigeTafel(b.dataset.tafel));
 });
 
 document.getElementById('kopieren').addEventListener('click', function(){
@@ -1357,6 +1935,83 @@ document.getElementById('neuladen').addEventListener('click', async function(){
   }catch(e){
     location.reload();
   }
+});
+
+/* Sichern: erst der Weg übers Teilen-Blatt, weil das auf dem iPhone in
+   "Dateien" landet. Wo das nicht geht, der schlichte Download. */
+document.getElementById('ernteSichern').addEventListener('click', async function(){
+  if(!letzteErnte){ this.textContent = 'Nichts da'; setTimeout(()=>{this.textContent='Ernte sichern';},1600); return; }
+  const text = JSON.stringify(letzteErnte, null, 1);
+  const name = ernteDateiname();
+  let datei = null;
+  try{ datei = new File([text], name, {type:'application/json'}); }catch(e){}
+  if(datei && navigator.canShare && navigator.canShare({files:[datei]}) && navigator.share){
+    try{ await navigator.share({files:[datei], title:'Zellenernte'}); return; }catch(e){}
+  }
+  const b = new Blob([text], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(b);
+  a.download = name;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+});
+
+/* Laden: ohne Foto, ohne Engine. Das Raster wird neu gerechnet, damit die
+   Geometrie bei jedem Laden mitgeprüft wird. */
+document.getElementById('ernteDatei').addEventListener('change', async function(e){
+  const datei = e.target.files && e.target.files[0];
+  const info = document.getElementById('ernteinfo');
+  if(!datei) return;
+  try{
+    const roh = JSON.parse(await datei.text());
+    if(!roh || roh.art !== 'zellenernte' || !Array.isArray(roh.zellen))
+      throw new Error('Das ist keine gesicherte Ernte.');
+
+    const teile = teileAusErnte(roh);
+    const raster = rasterBauen(teile[0].zeilen);
+    const nach = document.getElementById('optNach').checked;
+
+    const ziel = document.getElementById('tabelle');
+    ziel.innerHTML = '';
+    const gebaut = baueTabelle(teile, nach, raster);
+    ziel.appendChild(gebaut.knoten);
+
+    const neu = ernteBauen(teile, raster, gebaut.zuB, gebaut.zuO, {
+      breite: roh.quelle ? roh.quelle.breite : null,
+      hoehe:  roh.quelle ? roh.quelle.hoehe  : null,
+      winkel: roh.quelle ? roh.quelle.schraeglage : 0,
+      modell: roh.quelle ? roh.quelle.modell : '',
+      schwelle: roh.quelle ? roh.quelle.schwelle : '',
+      grenzen: null, datei: roh.quelle ? roh.quelle.datei : ''
+    });
+    const wann = (roh.erzeugt || '').replace('T',' ').substring(0,16);
+    ernteAnzeigen(neu, 'Geladen aus einer Ernte vom ' + wann + ' (' + (roh.app||'?') + '), ohne Foto. Raster und Zuordnung neu gerechnet.');
+
+    document.getElementById('zDauer').textContent   = '–';
+    document.getElementById('zWoerter').textContent = roh.zellen.length;
+    document.getElementById('zSicher').textContent  = '–';
+    document.getElementById('zWinkel').textContent  =
+      (roh.quelle && roh.quelle.schraeglage ? roh.quelle.schraeglage.toFixed(2) : '0') + '°';
+
+    const rt = document.getElementById('rohtexte');
+    rt.innerHTML = '';
+    [['Tabelle', gebaut.text.trim()], ['Raster und Ernte', ernteText(neu)]].forEach(function(paar){
+      const h = document.createElement('h3');
+      h.className = 'klein'; h.textContent = paar[0];
+      const pre = document.createElement('pre');
+      pre.textContent = paar[1] || '(leer)';
+      rt.appendChild(h); rt.appendChild(pre);
+    });
+    letzteAusgabe = 'Aus gesicherter Ernte vom ' + wann + '\n\n--- Tabelle ---\n' +
+                    gebaut.text.trim() + '\n\n--- Raster und Ernte ---\n' + ernteText(neu);
+
+    document.getElementById('ergebnis').style.display = 'block';
+    zeigeTafel('tErnte');
+    info.textContent = 'Geladen: ' + datei.name + ' · ' + roh.zellen.length + ' Zellen.';
+  }catch(err){
+    info.textContent = 'Ließ sich nicht laden: ' + err.message;
+  }
+  e.target.value = '';
 });
 
 document.getElementById('bildTeilen').addEventListener('click', function(){
