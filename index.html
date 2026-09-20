@@ -1,7 +1,33 @@
 <!DOCTYPE html>
 <!--
   PaddleOCR-Test · Verteilerbeschreibung
-  v0.12 · 20.09.2026
+  v0.13 · 21.09.2026
+
+  v0.13: Fehlerbehebung an v0.12. Auf Jeans iPhone fand die Linienerkennung
+  nur 12 statt 52 Linien, alle im oberen Blattdrittel; darunter war fuer jede
+  Zelle "ausserhalb des Rasters", und die Tabelle blieb leer.
+
+  Ursache war ein einziger Filter: Gebilde, deren Boundingbox hoeher als 2 %
+  des Bildes ist, wurden verworfen - gedacht gegen Textbloecke. Eine um 15 %
+  geneigte Linie steigt ueber 1000 Bildpunkte aber um 150 an. Der Filter warf
+  damit genau die geneigten Linien weg und liess nur die oberen, fast
+  waagerechten uebrig. Im Prototyp gab es ihn nicht, deshalb fiel er dort
+  nicht auf.
+
+  Jetzt wird statt der Hoehe die DUENNE geprueft: eine Tabellenlinie ist je
+  Spalte ein paar Bildpunkte hoch, ein Textblock nicht. Nachgerechnet am
+  selben Blatt: 11 Linien mit dem alten Filter, 52 mit dem neuen, und wieder
+  63 von 63 Zellen richtig.
+
+  Dazu zwei Sicherungen, damit so etwas nicht mehr stillschweigend durchgeht:
+   - Ein Raster muss die Ankerspalte zu mindestens 80 % abdecken, sonst wird
+     es verworfen und das Zeilengesetz uebernimmt. Das alte Raster sah in sich
+     voellig gesund aus - richtige Zeilenhoehe, gleichmaessige Abstaende - und
+     deckte trotzdem nur den oberen Teil ab. Die Abdeckung steht jetzt im
+     Rohtext.
+   - Im Bild-Reiter wird nur noch kraeftig gezeichnet, was wirklich gemessen
+     wurde; die Fortsetzung ueber die Enden hinaus ist gestrichelt. Damit ist
+     auf einen Blick zu sehen, wie weit ein Strich tatsaechlich reicht.
 
   v0.12: die gedruckten Tabellenlinien als Zeilenraster (Ebene 2).
 
@@ -331,7 +357,7 @@
 
   <header>
     <h1>PaddleOCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.12 · 20.09.2026</span>
+    <span class="ver">v0.13 · 21.09.2026</span>
   </header>
 
   <div class="karte">
@@ -457,7 +483,7 @@ const MODELLE = {
   latin: {name:'v5 lateinisch',  konstante:'V5_LATIN_MOBILE_MODEL'}
 };
 
-const VERSION = 'v0.12 · 20.09.2026';
+const VERSION = 'v0.13 · 21.09.2026';
 
 /* ==================== Schrittliste ==================== */
 
@@ -856,16 +882,26 @@ function linienFinden(canvas){
       }
     }
     nr++;
-    if(xMax-xMin < W*0.25 || yMax-yMin > H*0.02) continue;
+    if(xMax-xMin < W*0.25) continue;
     /* je Spalte die mittlere Höhe - daraus wird der Streckenzug */
     const sum = new Float64Array(xMax-xMin+1), anz = new Float64Array(xMax-xMin+1);
     punkte.forEach(function(p){
       const py = (p / W) | 0, px = p - py*W;
       sum[px-xMin] += py; anz[px-xMin]++;
     });
-    const xs = [], ys = [];
-    for(let i=0;i<sum.length;i++) if(anz[i]){ xs.push((xMin+i)*2); ys.push(sum[i]/anz[i]*2); }
+    const xs = [], ys = [], dick = [];
+    for(let i=0;i<sum.length;i++) if(anz[i]){
+      xs.push((xMin+i)*2); ys.push(sum[i]/anz[i]*2); dick.push(anz[i]);
+    }
     if(xs.length < W*0.2) continue;
+    /* NICHT die Höhe der Boundingbox prüfen. Das war der Fehler in v0.12:
+       eine um 15 % geneigte Linie steigt über 1000 Bildpunkte um 150 an, ihre
+       Boundingbox ist also hoch, obwohl die Linie dünn ist. Der Filter warf
+       damit genau die geneigten Linien weg und ließ nur die oberen, fast
+       waagerechten übrig - auf Jeans Blatt blieben 11 von 52.
+       Geprüft wird stattdessen die Dünne: eine Tabellenlinie ist je Spalte ein
+       paar Bildpunkte hoch, ein Textblock nicht. */
+    if(median(dick) > 6) continue;
     linien.push({xs, ys, x0:xs[0], x1:xs[xs.length-1],
                  mitte: ys.reduce((a,v)=>a+v,0)/ys.length});
   }
@@ -1763,14 +1799,28 @@ function verarbeite(erg, arbeit, winkel, leseDauer){
     if(linienAn){
       const lf = linienFinden(arbeit);
       gitter = gitterBauen(lf, arbeit.width);
+      let deckung = 0;
       if(gitter){
         basis = null;
         const f0 = nrZ.length ? gitter.feld(mitteX(nrZ[0]), nrZ[0].mitte) : null;
         if(f0) basis = f0.i; else gitter = null;
       }
+      /* Zweite Sicherung, aus dem Fehler in v0.12: ein Raster, das nur den
+         oberen Teil des Blattes abdeckt, sieht in sich völlig gesund aus -
+         richtige Zeilenhöhe, gleichmäßige Abstände - und liefert trotzdem für
+         fast jede Zelle "außerhalb". Es muss die Ankerspalte tragen. */
+      if(gitter && nrZ.length){
+        nrZ.forEach(function(z){ if(gitter.feld(mitteX(z), z.mitte)) deckung++; });
+        if(deckung / nrZ.length < 0.8){
+          mess.push('Linienraster verworfen: es deckt nur ' +
+                    Math.round(100*deckung/nrZ.length) + ' % der Nummernspalte ab');
+          gitter = null;
+        }
+      }
       mess.push(gitter
         ? 'Linienraster: ' + gitter.anzahl + ' Linien, Zeilenhöhe ' + Math.round(gitter.hoehe) +
-          ' px, Abstände gleichmäßig zu ' + Math.round(gitter.gleich*100) + ' %, ' +
+          ' px, Abstände gleichmäßig zu ' + Math.round(gitter.gleich*100) + ' %, deckt ' +
+          Math.round(100*deckung/Math.max(1,nrZ.length)) + ' % der Nummern ab, ' +
           Math.round(gitter.dauer) + ' ms'
         : 'Linienraster: keins zustande gekommen (' + lf.linien.length + ' lange Striche gefunden)');
       if(gitter){
@@ -1846,11 +1896,26 @@ function verarbeite(erg, arbeit, winkel, leseDauer){
   x.lineWidth = Math.max(3, Math.round(arbeit.width/330));
   if(gitter){
     gitter.linien.forEach(function(L){
+      /* was wirklich gemessen wurde, kräftig */
       x.beginPath();
-      x.moveTo(0, linieBei(L, 0));
-      for(let xx=60; xx<arbeit.width; xx+=60) x.lineTo(xx, linieBei(L, xx));
-      x.lineTo(arbeit.width, linieBei(L, arbeit.width));
+      x.moveTo(L.xs[0], L.ys[0]);
+      for(let i=1;i<L.xs.length;i+=30) x.lineTo(L.xs[i], L.ys[i]);
+      x.lineTo(L.xs[L.xs.length-1], L.ys[L.ys.length-1]);
       x.stroke();
+      /* was nur fortgesetzt wird, gestrichelt - damit auf einen Blick zu
+         sehen ist, wie weit der Strich tatsächlich reicht */
+      x.save();
+      x.setLineDash([14, 12]);
+      x.globalAlpha = 0.4;
+      if(L.xs[0] > 2){
+        x.beginPath(); x.moveTo(0, linieBei(L, 0)); x.lineTo(L.xs[0], L.ys[0]); x.stroke();
+      }
+      const e = L.xs.length-1;
+      if(L.xs[e] < arbeit.width-2){
+        x.beginPath(); x.moveTo(L.xs[e], L.ys[e]);
+        x.lineTo(arbeit.width, linieBei(L, arbeit.width)); x.stroke();
+      }
+      x.restore();
     });
   } else if(raster){
     for(let k = raster.von - 2; k <= raster.bis + 5; k++){
