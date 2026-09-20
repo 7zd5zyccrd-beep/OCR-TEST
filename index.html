@@ -1,7 +1,94 @@
 <!DOCTYPE html>
 <!--
   PaddleOCR-Test · Verteilerbeschreibung
-  v0.10 · 20.09.2026
+  v0.12 · 20.09.2026
+
+  v0.12: die gedruckten Tabellenlinien als Zeilenraster (Ebene 2).
+
+  Warum das noetig wurde. Jeans Originalblatt sagt: Bezeichnungen UND
+  Absicherungen stehen auf Zeile 37 bis 48. v0.10 und v0.11 setzten die
+  Bezeichnungen eine und die Absicherungen vier Zeilen zu hoch. Zwei Gruende,
+  beide grundsaetzlich:
+
+  Erstens laesst sich aus Wortpositionen allein eine Verschiebung um GANZE
+  Zeilen nicht aufloesen. Nachgerechnet an Jeans Musterloesung: eine
+  Homographie, nur aus der 243 Pixel schmalen Nummernspalte gefittet, passt
+  dort auf 0,02 Zeilen - und driftet auf die 1100 Pixel entfernte
+  Sicherungsspalte bis Zeile minus zehn ab. Probiert man alle Verschiebungen
+  beider Spalten durch, landet das echte Blatt auf Platz drei; der Abstand zum
+  Sieger ist Rauschen. Das Kriterium "die kleinste Korrektur gewinnt" aus v0.10
+  war deshalb nicht zu grob, sondern grundsaetzlich nicht entscheidbar.
+
+  Zweitens kann die Winkelsuche das nicht heilen. Die 52 Linien dieses Blattes
+  haben im Bild Neigungen von plus 1,2 bis minus 10,4 Grad - auf dem Papier
+  sind sie parallel, im Bild faechern Perspektive und die Wellung des Blattes
+  sie auf. Es gibt also keinen einen richtigen Drehwinkel.
+
+  Was jetzt passiert. Die Linien werden gesucht und liefern fuer jedes x die
+  Zeilengrenze. Ein Wort liegt in dem Feld, in dem es liegt - kein Versatz,
+  kein Massstab, nichts zu raten. Gegen Jeans Musterloesung: 63 von 63 Zellen
+  richtig, knappster Fall 0,33 Zeilen vom Rand.
+
+  Wie gesucht wird. Eine um zehn Grad geneigte Linie hat keinen langen
+  WAAGERECHTEN Lauf, sie wandert nach acht Bildpunkten in die naechste
+  Bildzeile. Gesucht wird deshalb in einundzwanzig Scherungen nacheinander.
+  Gerechnet auf halber Aufloesung, aber beim Verkleinern mit MINIMUM statt
+  Mittelwert - ein ein Bildpunkt duenner Strich ueberlebt nur so. 26 Millionen
+  Rechenschritte, auf dem Notebook 0,7 s in Python, in JavaScript deutlich
+  darunter.
+
+  Die Perspektive faellt als Nebenprodukt ab und wird gemeldet: eine einzige
+  Homographie beschreibt alle 52 Linien mit 0,09 Zeilen Restfehler. Zum
+  Zuordnen wird sie NICHT benutzt - die Linien sind besser, weil sie die
+  Wellung mitnehmen, die kein Modell einfangen kann (die untersten zehn Linien
+  weichen von ihrer eigenen Geraden um bis zu 22 Bildpunkte ab, eine halbe
+  Zeilenhoehe).
+
+  Ausserdem:
+   - Zellen werden ueber die Felder nachgetrennt statt ueber ein Modell.
+   - Der Sicherheitsabstand jeder Zelle zur naechsten Linie steht in der Ernte;
+     unter 0,15 Zeilen wird angemerkt statt stillschweigend zugeordnet.
+   - Die Rasterlinien im Bild-Reiter sind dick. In v0.10 und v0.11 waren sie
+     1 Bildpunkt breit auf 2000 Bildpunkten und auf dem iPhone unsichtbar.
+   - Neuer Schalter "Gedruckte Tabellenlinien suchen". Aus, oder wenn zu wenige
+     oder zu ungleichmaessige Linien gefunden werden, greift das Zeilengesetz
+     aus v0.10 als Rueckfall. Welche Ebene getragen hat, steht im Rohtext und
+     in der Ernte.
+
+  v0.11: die Deutung. Ab hier wird aus der Ernte etwas, das in die Felder
+  des E-Assistenten passt - streng getrennt vom Erkennen, die Deutung sieht
+  nur noch Text, Zeile und Spalte, kein Bild.
+
+  1. Spaltenrollen aus dem INHALT statt aus der Lage. Auf dem zweiten Blatt
+     traegt die rechte Spalte keine Orte, sondern Absicherungen; die
+     Ortsliste hat sie deshalb restlos geloescht. Jetzt wird gezaehlt, wie
+     viele Eintraege einer Spalte nach Absicherung, nach Ort und nach
+     Bezeichnung aussehen, und danach die Rolle vergeben.
+  2. Absicherung ueber ein Muster statt ueber eine Wortliste: B16 wird zu
+     Kennlinie B und 16 A, 25/0,03 zu FI 25 A / 30 mA - und damit zugleich
+     zur Geraetesorte. gG, gL, NH und E ebenso. Ein Nennstrom, den das
+     Auswahlfeld des E-Assistenten nicht kennt (B20 kommt auf diesem Blatt
+     dreimal vor), wird gedeutet und angemerkt.
+  3. Wortlisten KORRIGIEREN, sie loeschen nicht mehr. Drei Stufen: Treffer,
+     sauber gelesen ohne Listentreffer (bernstein), und verworfen - und
+     verworfen wird nur, was nicht einmal nach einem Wort aussieht.
+     Der Wortanfang hat Vorrang vor dem unscharfen Vergleich, sonst wird
+     aus "Steckdosenring" ein "Steckdosen".
+  4. Eine Zelle kann mehrere Felder tragen: "Licht/Steckdosen Bad/WC" wird
+     in Bezeichnung und Ort zerlegt, auch wenn es gar keine Ortsspalte gibt.
+     Getrennt wird am Ende der Zelle, an den Woertern, die vollstaendig auf
+     der Ortsliste stehen.
+  5. Abkuerzungen beidseitig: die Drucktabelle des E-Assistenten rueckwaerts
+     gelesen (Bel., Std., GS, WM, TR, AF, KUE, WZ, SZ, KZ, FL, BAD, HWR ...),
+     dazu gaengige Kuerzel fremder Schreiber.
+  6. Zellen nachtrennen. zeilenBilden hatte "Trafo" (Zeile 42) und
+     "Steckdosen Kueche" (Zeile 43) zu einem Eintrag verschmolzen, weil ihre
+     Hoehen bei 4 Grad Schraeglage nah beieinander liegen. Mit dem Raster ist
+     die Frage entschieden: jedes Wort bekommt seine eigene Zeile. Bleibt
+     doch ein Eintrag weit neben seiner Zeilenmitte, wird er angemerkt.
+
+  Die Ernte bleibt unberuehrt roh - sie ist der Stand VOR der Deutung und
+  laesst sich weiterhin sichern und ohne Foto wieder laden.
 
   v0.10: Zeilenraster statt relativer Lage, und die Ernte als eigener Stand.
 
@@ -217,6 +304,8 @@
   table.erg td.nr{white-space:nowrap;font-weight:640;width:22%}
   .klein-roh{display:block;font-size:12px;color:var(--grau)}
   .geaendert{color:var(--gruen-tief);font-weight:640}
+  .frei{color:var(--bernstein);font-weight:600}
+  .anmerkung{color:var(--bernstein)}
   .unklar{color:var(--rot)}
   .leer{color:var(--rot);font-style:italic}
   td.luecke-zeile{color:var(--bernstein);font-size:14px;font-weight:600;padding:8px 0}
@@ -242,7 +331,7 @@
 
   <header>
     <h1>PaddleOCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.10 · 20.09.2026</span>
+    <span class="ver">v0.12 · 20.09.2026</span>
   </header>
 
   <div class="karte">
@@ -288,6 +377,7 @@
       <div class="schalter"><input type="checkbox" id="optKopf" checked><label for="optKopf">Kopfzeilen verwerfen</label></div>
       <div class="schalter"><input type="checkbox" id="optSpalten" checked><label for="optSpalten">Spalten trennen</label></div>
       <div class="schalter"><input type="checkbox" id="optNach" checked><label for="optNach">Nummern und Wörter nachbearbeiten</label></div>
+      <div class="schalter"><input type="checkbox" id="optLinien" checked><label for="optLinien">Gedruckte Tabellenlinien suchen</label></div>
     </div>
     <p class="hinweis" id="fotoinfo">Am besten dasselbe Blatt wie bisher, damit wir vergleichen können.</p>
   </div>
@@ -308,7 +398,7 @@
     </div>
     <div class="tafel an" id="tTabelle">
       <div id="tabelle"></div>
-      <p class="legende">Grün heißt korrigiert, rot heißt unsicher oder bewusst leer gelassen. Darunter klein, was die Engine gelesen hat.</p>
+      <p class="legende">Grün heißt korrigiert, bernstein heißt gelesen und übernommen, obwohl das Wort auf keiner Liste steht, rot heißt unsicher oder leer. Darunter klein, was die Engine gelesen hat.</p>
     </div>
     <div class="tafel" id="tErnte">
       <div id="ernteKopf"></div>
@@ -352,7 +442,8 @@
 
 const BEZEICHNUNGEN = ['Licht','Steckdose','Steckdosen','Beleuchtung','E-Herd','Herd','Backofen',
   'Geschirrspüler','Waschmaschine','Trockner','Kühlschrank','Mikrowelle','Dunstabzug',
-  'Fehlerstromschutzschalter','Überspannungsschutz','Überspannungsableiter','Hauptschalter',
+  'Fehlerstromschutzschalter','FI-Schutzschalter','FI/LS','Überspannungsschutz',
+  'Überspannungsableiter','Hauptschalter',
   'Stromstoßschalter','Trafo','CEE-Steckdose','Klingel','Durchlauferhitzer','Warmwasser',
   'Boiler','Heizung','Rollladen','Arbeitsfläche','Außensteckdose','Reserve','Zuleitung','Garage'];
 
@@ -366,7 +457,7 @@ const MODELLE = {
   latin: {name:'v5 lateinisch',  konstante:'V5_LATIN_MOBILE_MODEL'}
 };
 
-const VERSION = 'v0.10 · 20.09.2026';
+const VERSION = 'v0.12 · 20.09.2026';
 
 /* ==================== Schrittliste ==================== */
 
@@ -651,6 +742,333 @@ function zuordnen(woerter, g0, g1){
   return gruppen;
 }
 
+/* ==================== Ebene 2: die gedruckten Linien ====================
+
+   Die Tabellenlinien laufen über die volle Blattbreite und legen für jedes x
+   fest, wo eine Zeile anfängt und aufhört. Damit entfällt alles, woran die
+   Fassungen v0.9 bis v0.11 gescheitert sind: kein Versatz je Spalte, keine
+   Verschiebung um ganze Zeilen, kein Kriterium, das raten muss.
+
+   Der Kniff steckt im Finden. Eine um zehn Grad geneigte Linie hat keinen
+   langen WAAGERECHTEN Lauf - sie wandert nach acht Bildpunkten in die nächste
+   Bildzeile. Gesucht wird deshalb in einundzwanzig Scherungen nacheinander:
+   erst das Bild passend schrägen, dann den langen Lauf suchen.
+
+   Gerechnet wird auf halber Auflösung, aber mit MINIMUM statt Mittelwert beim
+   Verkleinern - ein ein Bildpunkt dünner Strich überlebt das Halbieren nur so.
+   An Jeans Blatt: 52 Linien, gleiches Ergebnis wie bei voller Auflösung,
+   26 Millionen Rechenschritte. */
+
+function halbBild(canvas){
+  const w = canvas.width, h = canvas.height;
+  const d = canvas.getContext('2d').getImageData(0, 0, w, h).data;
+  const W = w >> 1, H = h >> 1;
+  const g = new Uint8Array(W*H), hist = new Array(256).fill(0);
+  for(let y=0;y<H;y++){
+    for(let x=0;x<W;x++){
+      let m = 255;
+      for(let dy=0; dy<2; dy++){
+        const zeile = (2*y+dy)*w;
+        for(let dx=0; dx<2; dx++){
+          const i = (zeile + 2*x + dx)*4;
+          const v = (d[i]*299 + d[i+1]*587 + d[i+2]*114)/1000 | 0;
+          if(v < m) m = v;
+        }
+      }
+      g[y*W+x] = m; hist[m]++;
+    }
+  }
+  return {g, W, H, hist, n:W*H};
+}
+
+function linienFinden(canvas){
+  const t0 = jetzt();
+  const b = halbBild(canvas);
+  const s = otsu(b.hist, b.n);
+  const W = b.W, H = b.H;
+  const dunkel = new Uint8Array(b.n);
+  for(let i=0;i<b.n;i++) if(b.g[i] < s) dunkel[i] = 1;
+
+  /* Langer Lauf in einundzwanzig Scherungen */
+  const maske = new Uint8Array(b.n);
+  const MIN = Math.max(18, Math.round(W*0.035));
+  const off = new Int32Array(W);
+  for(let is=-12; is<=8; is++){
+    const st = is*0.025;
+    for(let x=0;x<W;x++) off[x] = Math.round(x*st);
+    for(let y0=0; y0<H; y0++){
+      let lauf = 0, anf = 0;
+      for(let x=0; x<W; x++){
+        const y = y0 + off[x];
+        const da = (y>=0 && y<H) ? dunkel[y*W+x] : 0;
+        if(da){ if(!lauf) anf = x; lauf++; }
+        else {
+          if(lauf >= MIN)
+            for(let k=anf;k<x;k++){ const yy = y0+off[k]; if(yy>=0 && yy<H) maske[yy*W+k] = 1; }
+          lauf = 0;
+        }
+      }
+      if(lauf >= MIN)
+        for(let k=anf;k<W;k++){ const yy = y0+off[k]; if(yy>=0 && yy<H) maske[yy*W+k] = 1; }
+    }
+  }
+
+  /* Kleine waagerechte Lücken schließen, damit eine Linie nicht an jedem
+     Kreuzungspunkt in Stücke zerfällt. */
+  for(let y=0;y<H;y++){
+    const z = y*W;
+    let letzte = -99;
+    for(let x=0;x<W;x++){
+      if(maske[z+x]){
+        if(x - letzte <= 7) for(let k=letzte+1;k<x;k++) maske[z+k] = 1;
+        letzte = x;
+      }
+    }
+  }
+
+  /* Zusammenhängende Gebilde einsammeln */
+  const marke = new Int32Array(b.n).fill(-1);
+  const stapel = new Int32Array(b.n);
+  const linien = [];
+  let nr = 0;
+  for(let start=0; start<b.n; start++){
+    if(!maske[start] || marke[start] >= 0) continue;
+    let sp = 0; stapel[sp++] = start; marke[start] = nr;
+    let xMin = W, xMax = 0, yMin = H, yMax = 0, zahl = 0;
+    const punkte = [];
+    while(sp > 0){
+      const p = stapel[--sp];
+      const py = (p / W) | 0, px = p - py*W;
+      punkte.push(p); zahl++;
+      if(px < xMin) xMin = px;
+      if(px > xMax) xMax = px;
+      if(py < yMin) yMin = py;
+      if(py > yMax) yMax = py;
+      for(let dy=-1; dy<=1; dy++){
+        const ny = py+dy;
+        if(ny < 0 || ny >= H) continue;
+        for(let dx=-1; dx<=1; dx++){
+          const nx = px+dx;
+          if(nx < 0 || nx >= W) continue;
+          const q = ny*W+nx;
+          if(maske[q] && marke[q] < 0){ marke[q] = nr; stapel[sp++] = q; }
+        }
+      }
+    }
+    nr++;
+    if(xMax-xMin < W*0.25 || yMax-yMin > H*0.02) continue;
+    /* je Spalte die mittlere Höhe - daraus wird der Streckenzug */
+    const sum = new Float64Array(xMax-xMin+1), anz = new Float64Array(xMax-xMin+1);
+    punkte.forEach(function(p){
+      const py = (p / W) | 0, px = p - py*W;
+      sum[px-xMin] += py; anz[px-xMin]++;
+    });
+    const xs = [], ys = [];
+    for(let i=0;i<sum.length;i++) if(anz[i]){ xs.push((xMin+i)*2); ys.push(sum[i]/anz[i]*2); }
+    if(xs.length < W*0.2) continue;
+    linien.push({xs, ys, x0:xs[0], x1:xs[xs.length-1],
+                 mitte: ys.reduce((a,v)=>a+v,0)/ys.length});
+  }
+  linien.sort((a,b2) => a.mitte - b2.mitte);
+  return {linien, dauer: jetzt()-t0, gebilde: nr};
+}
+
+/* Höhe einer Linie an der Stelle x. Außerhalb ihres eigenen Bereichs wird
+   mit der Steigung ihrer Enden weitergeführt - die Tabellenlinien reichen
+   meist über alle Spalten, aber nicht immer bis zum Bildrand. */
+function linieBei(L, x){
+  const xs = L.xs, ys = L.ys, n = xs.length;
+  if(x <= xs[0]){
+    const k = Math.min(n-1, 40);
+    const st = k ? (ys[k]-ys[0])/(xs[k]-xs[0]) : 0;
+    return ys[0] + st*(x-xs[0]);
+  }
+  if(x >= xs[n-1]){
+    const k = Math.max(0, n-41);
+    const st = (n-1-k) ? (ys[n-1]-ys[k])/(xs[n-1]-xs[k]) : 0;
+    return ys[n-1] + st*(x-xs[n-1]);
+  }
+  let lo = 0, hi = n-1;
+  while(hi - lo > 1){ const m = (lo+hi)>>1; if(xs[m] <= x) lo = m; else hi = m; }
+  const t = (x - xs[lo]) / Math.max(1e-6, xs[hi]-xs[lo]);
+  return ys[lo] + t*(ys[hi]-ys[lo]);
+}
+
+/* Aus den Linien wird ein Raster nur dann, wenn sie auch wie eine Tabelle
+   aussehen: genug davon, und die Abstände gleichmäßig. Ein Blatt ohne
+   durchgezogene Linien fällt hier durch und bekommt das Zeilengesetz. */
+function gitterBauen(erg, breite){
+  const mitte = breite/2;
+  const roh = erg.linien.slice().sort(function(a,b){
+    return linieBei(a, mitte) - linieBei(b, mitte);
+  });
+  if(roh.length < 8) return null;
+  const hoehen = roh.map(L => linieBei(L, mitte));
+  const d = [];
+  for(let i=1;i<hoehen.length;i++) d.push(hoehen[i]-hoehen[i-1]);
+  const h = median(d);
+  if(!(h > 6)) return null;
+  /* Ausreißer werfen: was viel zu dicht am Vorgänger liegt, ist ein
+     Doppelfund; was viel zu weit weg liegt, ist eine Lücke (erlaubt). */
+  const linien = [roh[0]];
+  for(let i=1;i<roh.length;i++)
+    if(hoehen[i] - linieBei(linien[linien.length-1], mitte) > h*0.45) linien.push(roh[i]);
+  if(linien.length < 8) return null;
+  const d2 = [];
+  for(let i=1;i<linien.length;i++)
+    d2.push(linieBei(linien[i],mitte) - linieBei(linien[i-1],mitte));
+  const gut = d2.filter(v => v > h*0.65 && v < h*1.45).length;
+  if(gut / d2.length < 0.7) return null;
+
+  return {
+    linien, hoehe: h, anzahl: linien.length,
+    gleich: gut/d2.length, dauer: erg.dauer,
+    /* In welchem Feld liegt der Punkt? Und wie weit vom Rand? */
+    feld: function(x, y){
+      let oben = null;
+      for(let i=0;i<linien.length;i++){
+        const yy = linieBei(linien[i], x);
+        if(yy <= y) oben = {i, yy};
+        else if(oben !== null) return {i:oben.i, lage:(y-oben.yy)/Math.max(1e-6, yy-oben.yy)};
+        else return null;
+      }
+      return null;
+    }
+  };
+}
+
+/* Die Perspektive fällt als Nebenprodukt ab: v = (a*x+b*y+c)/(g*x+h*y+1)
+   über alle Linienpunkte. Sie wird nicht zum Zuordnen gebraucht - dafür sind
+   die Linien besser, weil sie die Wellung des Blattes mitnehmen -, aber sie
+   sagt in einer Zahl, wie schief das Blatt liegt, und trägt über den letzten
+   gefundenen Strich hinaus. An Jeans Blatt: 0,09 Zeilen Restfehler. */
+function perspektiveFitten(gitter){
+  const P = [];
+  gitter.linien.forEach(function(L, i){
+    for(let j=0;j<L.xs.length;j+=25) P.push([L.xs[j], L.ys[j], i]);
+  });
+  if(P.length < 50) return null;
+  let w = P.map(()=>1), s = null;
+  for(let runde=0; runde<6; runde++){
+    const A = [], rhs = [0,0,0,0,0];
+    for(let i=0;i<5;i++) A.push([0,0,0,0,0]);
+    P.forEach(function(p, idx){
+      const z = [p[0], p[1], 1, -p[0]*p[2], -p[1]*p[2]];
+      for(let a=0;a<5;a++){
+        for(let b2=0;b2<5;b2++) A[a][b2] += w[idx]*z[a]*z[b2];
+        rhs[a] += w[idx]*z[a]*p[2];
+      }
+    });
+    s = loeseN(A, rhs);
+    if(!s) return null;
+    w = P.map(p => 1/Math.max(1e-6, Math.abs(s[3]*p[0] + s[4]*p[1] + 1)));
+  }
+  let summe = 0, max = 0;
+  P.forEach(function(p){
+    const v = (s[0]*p[0]+s[1]*p[1]+s[2])/(s[3]*p[0]+s[4]*p[1]+1);
+    const r = Math.abs(v-p[2]);
+    summe += r; if(r > max) max = r;
+  });
+  return {s, mittel:summe/P.length, max, punkte:P.length,
+          neigung: function(k){ return 0; }};
+}
+
+function loeseN(A, b){
+  const n = b.length;
+  const M = A.map((r,i) => r.concat([b[i]]));
+  for(let i=0;i<n;i++){
+    let p = i;
+    for(let r=i+1;r<n;r++) if(Math.abs(M[r][i]) > Math.abs(M[p][i])) p = r;
+    if(Math.abs(M[p][i]) < 1e-14) return null;
+    const t = M[i]; M[i] = M[p]; M[p] = t;
+    for(let r=0;r<n;r++){
+      if(r === i) continue;
+      const f = M[r][i]/M[i][i];
+      for(let c=i;c<=n;c++) M[r][c] -= f*M[i][c];
+    }
+  }
+  return M.map((r,i) => r[n]/r[i]);
+}
+
+/* Zuordnung über die Linienfelder. Liefert dieselbe Form wie
+   zuordnungRaster, damit Tabelle und Ernte unverändert damit arbeiten.
+   "rest" ist hier der Abstand zur Feldmitte: 0 heißt mittig, ±0,5 heißt
+   genau auf einer Linie. Ab ±0,35 wird es angemerkt. */
+function zuordnungLinien(gitter, basis, nrZeilen, spalteZeilen){
+  const N = nrZeilen.length, M = spalteZeilen.length;
+  const zu = new Array(N).fill(-1), frei = new Array(M).fill(true);
+  const zeile = new Array(M).fill(null), rest = new Array(M).fill(0);
+  if(!M || !N) return {zu, frei, kosten:0, p:0, q:0, zeile, rest};
+  const wahl = {};
+  for(let j=0;j<M;j++){
+    const z = spalteZeilen[j];
+    const f = gitter.feld(mitteX(z), z.mitte);
+    if(!f) continue;
+    rest[j] = f.lage - 0.5;
+    const k = f.i - basis;
+    const alt = wahl[k];
+    if(alt === undefined || Math.abs(rest[j]) < Math.abs(rest[alt])){
+      if(alt !== undefined) zeile[alt] = null;
+      wahl[k] = j; zeile[j] = k;
+    }
+  }
+  for(let zi=0; zi<N; zi++){
+    const f = gitter.feld(mitteX(nrZeilen[zi]), nrZeilen[zi].mitte);
+    if(!f) continue;
+    const j = wahl[f.i - basis];
+    if(j !== undefined){ zu[zi] = j; frei[j] = false; }
+  }
+  return {zu, frei, kosten:0, p:0, q:0, zeile, rest};
+}
+
+function mitteX(z){
+  if(!z.woerter || !z.woerter.length) return z.x !== undefined ? z.x : 0;
+  let a = Infinity, b = -Infinity;
+  z.woerter.forEach(function(w){
+    if(!w.bbox) return;
+    if(w.bbox.x0 < a) a = w.bbox.x0;
+    if(w.bbox.x1 > b) b = w.bbox.x1;
+  });
+  return isFinite(a) ? (a+b)/2 : 0;
+}
+
+/* Wörter, die zeilenBilden über die Toleranz zusammengezogen hat, wieder
+   trennen - jetzt über die Felder statt über ein Modell. Damit lösen sich
+   "Trafo" und "Steckdosen Küche" von selbst, weil sie schlicht in
+   verschiedenen Feldern liegen. */
+function zeilenNachGitter(zeilen, gitter){
+  if(!zeilen || !zeilen.length) return zeilen;
+  const raus = [];
+  let getrennt = 0;
+  zeilen.forEach(function(z){
+    if(!z.woerter || z.woerter.length < 2){ raus.push(z); return; }
+    const koerbe = {};
+    let schlecht = false;
+    z.woerter.forEach(function(w){
+      if(!w.bbox){ schlecht = true; return; }
+      const f = gitter.feld((w.bbox.x0+w.bbox.x1)/2, (w.bbox.y0+w.bbox.y1)/2);
+      if(!f){ schlecht = true; return; }
+      (koerbe[f.i] = koerbe[f.i] || []).push(w);
+    });
+    const schluessel = Object.keys(koerbe);
+    if(schlecht || schluessel.length < 2){ raus.push(z); return; }
+    getrennt++;
+    schluessel.map(Number).sort((a,b2)=>a-b2).forEach(function(k){
+      const ws = koerbe[k].slice().sort((a,b2)=>a.bbox.x0-b2.bbox.x0);
+      raus.push({
+        woerter: ws,
+        mitte: ws.reduce((s,w)=>s+(w.bbox.y0+w.bbox.y1)/2, 0)/ws.length,
+        text: ws.map(w=>w.text).join(' '),
+        conf: ws.reduce((s,w)=>s+(w.confidence||0), 0)/ws.length
+      });
+    });
+  });
+  raus.sort((a,b2)=>a.mitte-b2.mitte);
+  raus.hoehe = zeilen.hoehe;
+  raus.getrennt = getrennt;
+  return raus;
+}
+
 /* ==================== Ebene 3: das Zeilengesetz ====================
 
    Auf dem Papier sind alle Zeilen gleich hoch. Schräg fotografiert wird aus
@@ -865,10 +1283,55 @@ function spalteEinhaengen(raster, zeilen){
       if(schlecht) continue;
       Object.keys(belegt).forEach(function(z){ if(belegt[z] > 1) kosten += 0.5*(belegt[z]-1); });
       kosten = kosten/y.length + 0.05*Math.abs(p)/h + 0.05*Math.abs(q)*(gross-klein)/h;
-      if(!best || kosten < best.kosten) best = {p, q, kosten, ks};
+      if(!best || kosten < best.kosten) best = {p, q, kosten, ks, kMitte};
     }
   }
-  return best || {p:0, q:0, kosten:0, ks:roh};
+  return best || {p:0, q:0, kosten:0, ks:roh, kMitte};
+}
+
+/* Zellen nachtrennen. zeilenBilden fasst Wörter über eine Toleranz zu einer
+   Zeile zusammen - auf dem zweiten Blatt wurden so "Trafo" (Zeile 42) und
+   "Steckdosen Küche" (Zeile 43) zu einem Eintrag, weil ihre Höhen bei 4°
+   Schräglage nah beieinander liegen. Mit dem Raster ist die Frage
+   entschieden: jedes Wort bekommt seine eigene Zeile, und was in
+   verschiedene Zeilen fällt, wird wieder getrennt. */
+function zeilenNachRaster(zeilen, raster){
+  if(!zeilen || zeilen.length < 1) return zeilen;
+  const einh = spalteEinhaengen(raster, zeilen);
+  const g = raster.gesetz;
+  const raus = [];
+  let getrennt = 0;
+  zeilen.forEach(function(z){
+    if(!z.woerter || z.woerter.length < 2){ raus.push(z); return; }
+    const koerbe = {};
+    let schlecht = false;
+    z.woerter.forEach(function(w){
+      if(!w.bbox){ schlecht = true; return; }
+      const my = (w.bbox.y0 + w.bbox.y1)/2;
+      let kk = kVon(g, my);
+      for(let t=0;t<2 && kk !== null && isFinite(kk);t++)
+        kk = kVon(g, my - (einh.p + einh.q*(kk - einh.kMitte)));
+      if(kk === null || !isFinite(kk)){ schlecht = true; return; }
+      const k = Math.round(kk);
+      (koerbe[k] = koerbe[k] || []).push(w);
+    });
+    const schluessel = Object.keys(koerbe);
+    if(schlecht || schluessel.length < 2){ raus.push(z); return; }
+    getrennt++;
+    schluessel.map(Number).sort(function(a,b){ return a-b; }).forEach(function(k){
+      const ws = koerbe[k].slice().sort(function(a,b){ return a.bbox.x0 - b.bbox.x0; });
+      const mitte = ws.reduce(function(s,w){ return s + (w.bbox.y0+w.bbox.y1)/2; }, 0)/ws.length;
+      raus.push({
+        woerter: ws, mitte,
+        text: ws.map(function(w){ return w.text; }).join(' '),
+        conf: ws.reduce(function(s,w){ return s + (w.confidence||0); }, 0)/ws.length
+      });
+    });
+  });
+  raus.sort(function(a,b){ return a.mitte - b.mitte; });
+  raus.hoehe = zeilen.hoehe;
+  raus.getrennt = getrennt;
+  return raus;
 }
 
 /* Liefert dieselbe Form wie zuordnungFinden, damit die Tabelle unverändert
@@ -1049,7 +1512,11 @@ function besteWahl(wort, liste){
     else if(d < zweitD) zweitD = d;
   });
   if(!best) return null;
-  const grenze = Math.max(1, Math.round(Math.max(w.length, best.length) * 0.35));
+  /* v0.11: von 0,35 auf 0,25 und abgerundet. Mit 0,35 wurde aus "Kiche"
+     ein "Licht" - zwei von fuenf Zeichen sind keine Lesefehler mehr,
+     sondern ein anderes Wort. "Geschirspueler" (ein Zeichen von 14) und
+     "stackdosen" (eins von 10) gehen weiterhin durch. */
+  const grenze = Math.max(1, Math.floor(Math.max(w.length, best.length) * 0.25));
   if(bestD > grenze) return null;
   if(bestD > 0 && zweitD === bestD) return null;   /* nicht eindeutig */
   return {wort:best, d:bestD};
@@ -1268,7 +1735,8 @@ function verarbeite(erg, arbeit, winkel, leseDauer){
   ziel.innerHTML = '';
   let tabellenText = '';
   let messText = '';
-  let raster = null;
+  let raster = null, gitter = null, basis = 0, persp = null;
+  const linienAn = document.getElementById('optLinien').checked;
   if(gruppen){
     const teile = [
       {name:'Nummer',      zeilen: zeilenBilden(gruppen[0])},
@@ -1290,10 +1758,42 @@ function verarbeite(erg, arbeit, winkel, leseDauer){
       mess.push('Abstände in der Nummernspalte: ' + abstaende.join(', '));
     }
 
-    /* Ebene 3: das Zeilengesetz aus der Nummernspalte. */
+    /* Ebene 2 zuerst: die gedruckten Linien. Nur wenn sie ausfallen,
+       kommt das Zeilengesetz aus der Nummernspalte zum Zug. */
+    if(linienAn){
+      const lf = linienFinden(arbeit);
+      gitter = gitterBauen(lf, arbeit.width);
+      if(gitter){
+        basis = null;
+        const f0 = nrZ.length ? gitter.feld(mitteX(nrZ[0]), nrZ[0].mitte) : null;
+        if(f0) basis = f0.i; else gitter = null;
+      }
+      mess.push(gitter
+        ? 'Linienraster: ' + gitter.anzahl + ' Linien, Zeilenhöhe ' + Math.round(gitter.hoehe) +
+          ' px, Abstände gleichmäßig zu ' + Math.round(gitter.gleich*100) + ' %, ' +
+          Math.round(gitter.dauer) + ' ms'
+        : 'Linienraster: keins zustande gekommen (' + lf.linien.length + ' lange Striche gefunden)');
+      if(gitter){
+        persp = perspektiveFitten(gitter);
+        if(persp) mess.push('Perspektive aus den Linien: Restfehler ' + persp.mittel.toFixed(2) +
+                            ' Zeilen im Mittel, höchstens ' + persp.max.toFixed(2));
+      }
+    }
+
+    /* Ebene 3: das Zeilengesetz aus der Nummernspalte - Rückfall. */
     raster = rasterBauen(nrZ);
 
-    const gebaut = baueTabelle(teile, nach, raster);
+    let getrennt = 0;
+    [1,2].forEach(function(i){
+      if(gitter) teile[i].zeilen = zeilenNachGitter(teile[i].zeilen, gitter);
+      else if(raster) teile[i].zeilen = zeilenNachRaster(teile[i].zeilen, raster);
+      getrennt += teile[i].zeilen.getrennt || 0;
+    });
+    if(getrennt) mess.push('Nachgetrennt: ' + getrennt + ' zusammengefallene Zelle(n)');
+    mess.push('Zeilen kommen von: ' + (gitter ? 'den gedruckten Linien' : (raster ? 'dem Zeilengesetz der Nummernspalte' : 'nichts – Zuordnung wie in v0.9')));
+
+    const rv = rollenVerteilen(teile);
+    const gebaut = baueTabelle(teile, nach, raster, rv.rollen, gitter, basis);
     ziel.appendChild(gebaut.knoten);
     tabellenText = gebaut.text;
 
@@ -1301,7 +1801,11 @@ function verarbeite(erg, arbeit, winkel, leseDauer){
       breite: arbeit.width, hoehe: arbeit.height, winkel,
       modell: MODELLE[aktivesModell] ? MODELLE[aktivesModell].name : aktivesModell,
       schwelle: document.getElementById('schwelle').value,
-      grenzen, datei: letzterDateiname
+      grenzen, datei: letzterDateiname, rollen: rv.rollen, guete: rv.guete,
+      zeilenquelle: gitter ? {art:'linien', anzahl:gitter.anzahl, hoehe:Math.round(gitter.hoehe),
+                              gleich:Math.round(gitter.gleich*100),
+                              perspektive: persp ? Math.round(persp.mittel*100)/100 : null}
+                           : {art:'nummerngesetz'}
     });
     ernteAnzeigen(ernte, null);
     mess.push('');
@@ -1333,18 +1837,29 @@ function verarbeite(erg, arbeit, winkel, leseDauer){
      werden die Zeilengrenzen, also k + 0,5 - zwischen den Zeilen, nicht auf
      ihnen. Fünf Zeilen über den letzten gelesenen hinaus, weil das Gesetz
      auch dort noch trägt. */
-  if(raster){
-    x.save();
-    x.strokeStyle = '#D98E0B';
-    x.globalAlpha = 0.5;
-    x.lineWidth = Math.max(1, Math.round(arbeit.width/1500));
+  /* Dick genug, um auf einem Telefon sichtbar zu sein: in v0.10 und v0.11
+     war die Linie 1 Bildpunkt breit auf 2000 Bildpunkten Bildbreite und auf
+     dem iPhone schlicht unsichtbar. */
+  x.save();
+  x.strokeStyle = '#D98E0B';
+  x.globalAlpha = 0.75;
+  x.lineWidth = Math.max(3, Math.round(arbeit.width/330));
+  if(gitter){
+    gitter.linien.forEach(function(L){
+      x.beginPath();
+      x.moveTo(0, linieBei(L, 0));
+      for(let xx=60; xx<arbeit.width; xx+=60) x.lineTo(xx, linieBei(L, xx));
+      x.lineTo(arbeit.width, linieBei(L, arbeit.width));
+      x.stroke();
+    });
+  } else if(raster){
     for(let k = raster.von - 2; k <= raster.bis + 5; k++){
       const yy = yVon(raster.gesetz, k + 0.5);
       if(yy === null || !isFinite(yy) || yy < 0 || yy > arbeit.height) continue;
       x.beginPath(); x.moveTo(0, yy); x.lineTo(arbeit.width, yy); x.stroke();
     }
-    x.restore();
   }
+  x.restore();
 
   x.lineWidth = Math.max(1, Math.round(arbeit.width/700));
   const farben = ['#C0392B','#7CA82C','#1E6FD9'];
@@ -1435,6 +1950,7 @@ function ernteBauen(teile, raster, zuB, zuO, meta){
     spalten.push({
       nr: si,
       lage: LAGEN[si] || ('spalte' + si),
+      rolle: (meta.rollen && meta.rollen[si]) || null,
       anker: si === 0,
       von: si === 0 ? 0 : (meta.grenzen ? Math.round(meta.grenzen[si-1]) : null),
       bis: si === 2 ? meta.breite : (meta.grenzen ? Math.round(meta.grenzen[si]) : null),
@@ -1478,6 +1994,7 @@ function ernteBauen(teile, raster, zuB, zuO, meta){
       modell: meta.modell || '', schwelle: meta.schwelle,
       datei: meta.datei || ''
     },
+    zeilenquelle: meta.zeilenquelle || null,
     raster: raster ? {
       a: raster.gesetz.a, b: raster.gesetz.b, c: raster.gesetz.c,
       ersteZeile: 1, letzteZeile: raster.bis - raster.von + 1,
@@ -1506,8 +2023,8 @@ function ernteText(e){
     zeilen.push('Zeilenraster: nicht zustande gekommen');
   }
   e.spalten.forEach(function(s){
-    if(s.anker){ zeilen.push('Spalte ' + s.lage + ' (Anker): ' + s.eintraege + ' Einträge'); return; }
-    zeilen.push('Spalte ' + s.lage + ': ' + s.eintraege + ' Einträge, Versatz ' +
+    if(s.anker){ zeilen.push('Spalte ' + s.lage + ' = Nummer (Anker): ' + s.eintraege + ' Einträge'); return; }
+    zeilen.push('Spalte ' + s.lage + (s.rolle ? ' = ' + s.rolle : '') + ': ' + s.eintraege + ' Einträge, Versatz ' +
       (s.versatz >= 0 ? '+' : '') + s.versatz + ' px, Drift ' +
       (s.drift >= 0 ? '+' : '') + s.drift + ' px/Zeile' +
       (s.kosten === null ? '' : ', Kosten ' + s.kosten));
@@ -1543,7 +2060,7 @@ function ernteAnzeigen(e, herkunft){
   }
   e.spalten.forEach(function(s){
     if(s.anker) return;
-    teile.push('Spalte <b>' + s.lage + '</b>: Versatz ' + (s.versatz>=0?'+':'') + s.versatz +
+    teile.push('Spalte <b>' + s.lage + '</b>' + (s.rolle ? ' trägt <b>' + s.rolle + '</b>' : '') + ': Versatz ' + (s.versatz>=0?'+':'') + s.versatz +
       ' px, Drift ' + (s.drift>=0?'+':'') + s.drift + ' px je Zeile' +
       (s.kosten === null ? '' : ', Kosten ' + s.kosten) + '.');
   });
@@ -1617,220 +2134,336 @@ function ernteDateiname(){
          '-' + zwei(d.getHours()) + zwei(d.getMinutes()) + '.json';
 }
 
-/* ==================== Tabelle bauen ==================== */
+/* ==================== Deutung ====================
 
-/* Zuordnung Nummer <-> Spalteneintrag.
+   Ab hier wird aus der Ernte etwas, das in die Felder des E-Assistenten
+   passt. Streng getrennt vom Erkennen: die Deutung sieht nur noch Text,
+   Zeile und Spalte - kein Bild, keine Pixel.
 
-   Vorher: zu jeder Nummer der Eintrag mit der geringsten Höhendifferenz, jede
-   Nummer für sich. Das erlaubte, denselben Eintrag zweimal zu nehmen, und die
-   Reihenfolge konnte kippen – "Stromkreis 5/6" hing an 13-15 UND an 16-19,
-   während der Überspannungsschutz übrig blieb.
+   Drei Sätze, die in v0.9 noch fehlten und dieses Blatt gekostet haben:
+   die Spaltenrolle kommt aus dem INHALT, nicht aus der Position; eine
+   Wortliste KORRIGIERT, sie löscht nicht; und eine Zelle kann mehr als
+   ein Feld tragen. */
 
-   Jetzt: beide Listen laufen von oben nach unten, also wird eine Zuordnung
-   gesucht, die die Reihenfolge einhält und Lücken zulässt. Gewählt wird die
-   mit der kleinsten Summe an Höhensprüngen; eine Lücke kostet einen festen
-   Aufschlag. Damit landet die fehlende Bezeichnung bei 16-19 dort, wo sie die
-   wenigsten Sprünge verursacht, statt alles Folgende zu verschieben. */
-function einDurchgang(nrZeilen, spalteZeilen, hoehe, versatz){
-  const N = nrZeilen.length, M = spalteZeilen.length;
-  const LUECKE = hoehe * 1.2;
-  const MAX = hoehe * 2.2;
-  const f = [], weg = [];
-  for(let i=0;i<=N;i++){
-    f.push(new Array(M+1).fill(Infinity));
-    weg.push(new Array(M+1).fill(null));
+/* Eure Drucktabelle rückwärts gelesen, dazu ein paar Kürzel fremder
+   Schreiber. Wird vor jedem Listenvergleich angewandt. */
+const ABKUERZUNGEN = {
+  'bel':'Beleuchtung','licht':'Licht','lt':'Licht',
+  'std':'Steckdosen','sd':'Steckdosen','stdo':'Steckdosen','dose':'Steckdose',
+  'cee':'CEE-Steckdose','gs':'Geschirrspüler','gsp':'Geschirrspüler',
+  'wm':'Waschmaschine','wama':'Waschmaschine','tr':'Trockner','trk':'Trockner',
+  'af':'Arbeitsfläche','li':'links','re':'rechts',
+  'kü':'Küche','ku':'Küche','kue':'Küche','wz':'Wohnzimmer','sz':'Schlafzimmer',
+  'kz':'Kinderzimmer','zi':'Kinderzimmer','fl':'Flur','bad':'Badezimmer',
+  'hwr':'Hauswirtschaftsraum','bn':'Balkon','bk':'Balkon','kel':'Keller',
+  'kam':'Kammer','whg':'Wohnung','fi':'FI-Schutzschalter','rcd':'FI-Schutzschalter',
+  'üs':'Überspannungsableiter','ueberspannung':'Überspannungsableiter'
+};
+
+/* Nennströme, die der E-Assistent im Auswahlfeld anbietet. Alles andere
+   wird gedeutet, aber angemerkt - sonst trägt SAM später einen Wert ein,
+   den das Feld gar nicht kennt. */
+const NENNSTROEME_APP = [2, 6, 10, 16, 25, 32, 35, 40];
+
+/* Aus "B16" wird Charakteristik B und 16 A, aus "25/0,03" ein FI mit 25 A
+   und 30 mA - und damit zugleich die Gerätesorte, die der Kreis bekommt.
+   Erkannt über ein Muster, nicht über eine Wortliste: eine Absicherung ist
+   an ihrer Form erkennbar, nicht an ihrem Vorkommen in einer Aufzählung. */
+function sicherungDeuten(roh){
+  const erg = {roh, text:'', art:null, kennlinie:null, strom:null, ma:null,
+               herkunft:'verworfen', unklar:false, hinweis:'', leer:false};
+  let t = saeubern(roh).replace(/\s+/g,'').replace(/\./g,',').toUpperCase();
+  if(!t){ erg.leer = true; return erg; }
+  let korrigiert = false;
+  /* "816" statt "B16": in einer Sicherungsspalte gibt es keine 816 Ampere. */
+  let m = /^8(\d{1,2})$/.exec(t);
+  if(m && +m[1] <= 63){ t = 'B' + m[1]; korrigiert = true; }
+  t = t.replace(/A$/, '');
+  /* "Bl6" statt "B16": hinter der Kennlinie stehen nur Ziffern, also
+     dieselbe Buchstabenersetzung wie in der Nummernspalte. */
+  if(!/^[BCDKZ]\d{1,3}$/.test(t) && (m = /^([BCDKZ])(.{1,3})$/.exec(t)) && /[^0-9]/.test(m[2])){
+    const z = m[2].split('').map(function(c){ return ZU_ZIFFER[c] || ZU_ZIFFER[c.toLowerCase()] || c; }).join('');
+    if(/^\d{1,3}$/.test(z) && +z <= 125){ t = m[1] + z; korrigiert = true; }
   }
-  f[0][0] = 0;
-  for(let i=0;i<=N;i++){
-    for(let j=0;j<=M;j++){
-      const hier = f[i][j];
-      if(hier === Infinity) continue;
-      if(i < N && hier + LUECKE < f[i+1][j]){
-        f[i+1][j] = hier + LUECKE; weg[i+1][j] = ['zeile', i, j];
-      }
-      if(j < M && hier + LUECKE < f[i][j+1]){
-        f[i][j+1] = hier + LUECKE; weg[i][j+1] = ['eintrag', i, j];
-      }
-      if(i < N && j < M){
-        const d = Math.abs(nrZeilen[i].mitte - (spalteZeilen[j].mitte - versatz));
-        if(d <= MAX && hier + d < f[i+1][j+1]){
-          f[i+1][j+1] = hier + d; weg[i+1][j+1] = ['paar', i, j];
-        }
-      }
-    }
-  }
-  const zu = new Array(N).fill(-1);
-  const frei = new Array(M).fill(true);
-  let i = N, j = M;
-  while(i > 0 || j > 0){
-    const s = weg[i][j];
-    if(!s) break;
-    if(s[0] === 'paar'){ zu[s[1]] = s[2]; frei[s[2]] = false; i--; j--; }
-    else if(s[0] === 'zeile'){ i--; }
-    else { j--; }
-  }
-  return {zu, frei, kosten: f[N][M]};
-}
 
-/* Die Lage eines Eintrags INNERHALB seiner eigenen Spalte, von 0 am ersten bis
-   1 am letzten Eintrag. */
-function relativeLage(zeilen){
-  const erste = zeilen[0].mitte;
-  const spanne = zeilen[zeilen.length-1].mitte - erste;
-  if(!(spanne > 0)) return zeilen.map(() => 0);
-  return zeilen.map(z => (z.mitte - erste) / spanne);
-}
-
-/* Gemessen an Jeans Schild: der Versatz zwischen Nummern- und Ortsspalte wächst
-   von +18 Pixel oben auf -140 unten, also fast zwei Zeilenhöhen. Ein fester
-   Grundversatz (v0.6/v0.7) kann das nicht einfangen, egal wie weit man ihn
-   suchen lässt.
-
-   Beide Spalten beginnen und enden aber gemeinsam und sind dazwischen
-   gleichmäßig geteilt. Verglichen wird deshalb nicht die absolute Höhe, sondern
-   die relative Lage in der eigenen Spalte. An den Messwerten: die Abweichung
-   fällt damit von knapp zwei Zeilen auf höchstens 0,014 der Spaltenlänge,
-   während eine falsche Paarung 0,09 kostet - ein Abstand, der sicher entscheidet.
-
-   Grenze des Verfahrens: es unterstellt, dass der erste und der letzte Eintrag
-   einer Spalte zur ersten und letzten Nummer gehören. Fehlt ausgerechnet dort
-   ein Eintrag, verzieht sich der Maßstab; die zugelassenen Lücken fangen das
-   bis zu einem gewissen Grad ab. */
-function zuordnungFinden(nrZeilen, spalteZeilen, hoehe){
-  const N = nrZeilen.length, M = spalteZeilen.length;
-  if(!N || !M){
-    return {zu:new Array(N).fill(-1), frei:new Array(M).fill(true), kosten:0, versatz:0};
-  }
-  if(N < 2 || M < 2){
-    const erg = einDurchgang(nrZeilen, spalteZeilen, hoehe, 0);
-    erg.versatz = 0;
+  if((m = /^(\d{1,3})\/0,(\d{1,3})$/.exec(t))){
+    erg.art = 'FI';
+    erg.strom = +m[1];
+    erg.ma = Math.round(parseFloat('0.' + m[2]) * 1000);
+    erg.text = 'FI ' + erg.strom + ' A / ' + erg.ma + ' mA';
+  } else if((m = /^([BCDKZ])(\d{1,3})$/.exec(t))){
+    erg.art = 'LS'; erg.kennlinie = m[1]; erg.strom = +m[2];
+    erg.text = m[1] + ' ' + erg.strom + ' A';
+  } else if((m = /^(GG|GL|NH|E)(\d{1,3})$/.exec(t))){
+    erg.art = 'Schmelz';
+    erg.kennlinie = (m[1] === 'GG') ? 'gG' : (m[1] === 'GL' ? 'gL' : m[1]);
+    erg.strom = +m[2];
+    erg.text = erg.kennlinie + ' ' + erg.strom + ' A';
+  } else if((m = /^(\d{1,3})$/.exec(t)) && +m[1] <= 125){
+    erg.art = 'Strom'; erg.strom = +m[1];
+    erg.text = erg.strom + ' A';
+    erg.hinweis = 'ohne Kennlinie';
+  } else {
+    erg.unklar = true;
+    erg.text = saeubern(roh);
     return erg;
   }
-
-  const pn = relativeLage(nrZeilen);
-  const ps = relativeLage(spalteZeilen);
-  const schritt = 1 / (N - 1);
-  const LUECKE = schritt * 0.5;
-  const MAX = schritt * 2.5;
-
-  const f = [], weg = [];
-  for(let i=0;i<=N;i++){
-    f.push(new Array(M+1).fill(Infinity));
-    weg.push(new Array(M+1).fill(null));
-  }
-  f[0][0] = 0;
-  for(let i=0;i<=N;i++){
-    for(let j=0;j<=M;j++){
-      const hier = f[i][j];
-      if(hier === Infinity) continue;
-      if(i < N && hier + LUECKE < f[i+1][j]){
-        f[i+1][j] = hier + LUECKE; weg[i+1][j] = ['zeile', i, j];
-      }
-      if(j < M && hier + LUECKE < f[i][j+1]){
-        f[i][j+1] = hier + LUECKE; weg[i][j+1] = ['eintrag', i, j];
-      }
-      if(i < N && j < M){
-        const d = Math.abs(pn[i] - ps[j]);
-        if(d <= MAX && hier + d < f[i+1][j+1]){
-          f[i+1][j+1] = hier + d; weg[i+1][j+1] = ['paar', i, j];
-        }
-      }
-    }
-  }
-
-  const zu = new Array(N).fill(-1);
-  const frei = new Array(M).fill(true);
-  let i = N, j = M;
-  while(i > 0 || j > 0){
-    const s = weg[i][j];
-    if(!s) break;
-    if(s[0] === 'paar'){ zu[s[1]] = s[2]; frei[s[2]] = false; i--; j--; }
-    else if(s[0] === 'zeile'){ i--; }
-    else { j--; }
-  }
-  return {zu, frei, kosten:f[N][M], versatz:0};
+  erg.herkunft = korrigiert ? 'korrigiert' : 'gelesen';
+  if(erg.art !== 'FI' && erg.strom !== null && NENNSTROEME_APP.indexOf(erg.strom) < 0)
+    erg.hinweis = (erg.hinweis ? erg.hinweis + ', ' : '') + erg.strom + ' A steht nicht im Auswahlfeld';
+  return erg;
 }
 
-function baueTabelle(teile, nach, raster){
-  const nr = teile[0].zeilen, bez = teile[1].zeilen, ort = teile[2].zeilen;
-  const hoehe = (raster && raster.hoehe) || nr.hoehe || bez.hoehe || 40;
-  const benutztB = {}, benutztO = {};
+function siehtNachWortAus(t){
+  if(!t || t.length < 3) return false;
+  const b = (t.match(/[A-Za-zÄÖÜäöüß]/g) || []).length;
+  return b / t.length >= 0.6;
+}
+
+/* Ein einzelner Teil einer Zelle. Reihenfolge mit Bedacht: Abkürzung, dann
+   glatter Treffer, dann der Wortanfang - und erst zuletzt der unscharfe
+   Vergleich. Ohne den Vorrang des Wortanfangs wird aus "Steckdosenring"
+   ein "Steckdosen", weil der unscharfe Vergleich vier fehlende Zeichen
+   noch durchgehen lässt. */
+function teilDeuten(teil, liste){
+  const t = saeubern(teil);
+  if(!t) return null;
+  const schlank = t.toLowerCase().replace(/[.\-]+$/,'');
+  /* Die Abkürzung muss zu DIESER Liste gehören: sonst gilt "Std." auch als
+     Ortswort, und "Std. KÜ" wandert vollständig in die Ortsspalte. */
+  if(ABKUERZUNGEN[schlank] && liste.indexOf(ABKUERZUNGEN[schlank]) >= 0){
+    const w = ABKUERZUNGEN[schlank];
+    return {text:w, herkunft: (w.toLowerCase() === t.toLowerCase()) ? 'gelesen' : 'korrigiert'};
+  }
+  for(let i=0;i<liste.length;i++)
+    if(liste[i].toLowerCase() === t.toLowerCase()) return {text:liste[i], herkunft:'gelesen'};
+  for(let i=0;i<liste.length;i++){
+    const k = liste[i];
+    if(t.length <= k.length + 1) continue;
+    const d = abstand(t.substring(0, k.length), k);
+    if(d <= Math.max(0, Math.round(k.length*0.2)))
+      return {text: k + t.substring(k.length), herkunft: d ? 'korrigiert' : 'gelesen'};
+  }
+  const w = besteWahl(t, liste);
+  if(w) return {text:w.wort, herkunft: w.d ? 'korrigiert' : 'gelesen'};
+  return null;
+}
+
+/* Ein ganzes Feld: "Licht/Steckdosen" oder "Bad/WC". Kein Treffer heißt
+   ab v0.11 nicht mehr leeren - sauber Gelesenes bleibt stehen und wird
+   bernsteinfarben gekennzeichnet. Verworfen wird nur, was nicht einmal
+   nach einem Wort aussieht. */
+function feldDeuten(roh, liste){
+  const t = saeubern(roh);
+  const erg = {roh, text:'', herkunft:'leer', unklar:false, leer:false};
+  if(!t){ erg.leer = true; return erg; }
+  const teile = t.split('/');
+  const raus = [];
+  let korrigiert = false, frei = false;
+  for(let i=0;i<teile.length;i++){
+    const tr = saeubern(teile[i]);
+    if(!tr) continue;
+    const d = teilDeuten(tr, liste);
+    if(d){ raus.push(d.text); if(d.herkunft === 'korrigiert') korrigiert = true; }
+    else if(siehtNachWortAus(tr)){ raus.push(tr); frei = true; }
+    else { erg.text = t; erg.unklar = true; erg.herkunft = 'unklar'; return erg; }
+  }
+  if(!raus.length){ erg.leer = true; return erg; }
+  erg.text = raus.join(' / ');
+  erg.herkunft = frei ? 'frei' : (korrigiert ? 'korrigiert' : 'gelesen');
+  return erg;
+}
+
+/* Eine Zelle kann Bezeichnung UND Ort tragen, auch wenn es gar keine
+   Ortsspalte gibt: "Licht/Steckdosen Bad/WC". Getrennt wird am Ende der
+   Zelle - die hinteren Wörter, die vollständig auf der Ortsliste stehen,
+   sind der Ort, der Rest ist die Bezeichnung. */
+function istOrtsteil(wort){
+  const teile = saeubern(wort).split('/');
+  let treffer = 0;
+  for(let i=0;i<teile.length;i++){
+    const tr = saeubern(teile[i]);
+    if(!tr) continue;
+    const d = teilDeuten(tr, ORTE);
+    if(!d) return false;
+    treffer++;
+  }
+  return treffer > 0;
+}
+
+function bezUndOrt(roh){
+  const t = saeubern(roh);
+  if(!t) return {bez:feldDeuten('', BEZEICHNUNGEN), ort:feldDeuten('', ORTE)};
+  const woerter = t.split(' ');
+  let schnitt = woerter.length;
+  while(schnitt > 0 && istOrtsteil(woerter[schnitt-1])) schnitt--;
+  /* Nur Ortswörter in der Zelle: dann ist sie der Ort. Dass eine ganze
+     Spalte so aussieht, fängt die Rollenvergabe ab - die macht daraus
+     dann ohnehin die Ortsspalte. */
+  if(schnitt === 0)
+    return {bez:feldDeuten('', BEZEICHNUNGEN), ort:feldDeuten(t, ORTE)};
+  if(schnitt === woerter.length)
+    return {bez:feldDeuten(t, BEZEICHNUNGEN), ort:feldDeuten('', ORTE)};
+  return {
+    bez: feldDeuten(woerter.slice(0, schnitt).join(' '), BEZEICHNUNGEN),
+    ort: feldDeuten(woerter.slice(schnitt).join(' '), ORTE)
+  };
+}
+
+/* Welche Spalte trägt was - gefragt wird der Inhalt, nicht die Lage.
+   Auf dem zweiten Blatt sitzt rechts keine Ortsspalte, sondern die
+   Absicherung; genau daran ist v0.9 gescheitert. */
+function rolleMessen(zeilen){
+  let n = 0, s = 0, o = 0, b = 0;
+  (zeilen || []).forEach(function(z){
+    const t = saeubern(z.text);
+    if(!t) return;
+    n++;
+    if(sicherungDeuten(t).art) s++;
+    const f = bezUndOrt(t);
+    if(f.ort && !f.ort.leer && !f.ort.unklar) o++;
+    else if(istOrtsteil(t)) o++;
+    const d = feldDeuten(t, BEZEICHNUNGEN);
+    if(!d.leer && !d.unklar && d.herkunft !== 'frei') b++;
+  });
+  return {n, sicherung:n?s/n:0, ort:n?o/n:0, bez:n?b/n:0};
+}
+
+function rollenVerteilen(teile){
+  const rollen = ['nummer', null, null];
+  const g = [null, rolleMessen(teile[1].zeilen), rolleMessen(teile[2].zeilen)];
+  let sIdx = -1, sBest = 0.6;
+  [1,2].forEach(function(i){
+    if(g[i].n >= 2 && g[i].sicherung > sBest){ sBest = g[i].sicherung; sIdx = i; }
+  });
+  if(sIdx > 0) rollen[sIdx] = 'absicherung';
+  const rest = [1,2].filter(function(i){ return !rollen[i]; });
+  if(rest.length === 2){
+    rollen[1] = 'bezeichnung';
+    rollen[2] = 'ort';
+  } else if(rest.length === 1){
+    const i = rest[0];
+    rollen[i] = (g[i].n && g[i].ort > g[i].bez && g[i].ort >= 0.5) ? 'ort' : 'bezeichnung';
+  }
+  return {rollen, guete:g};
+}
+
+/* ==================== Tabelle bauen ==================== */
+
+function baueTabelle(teile, nach, raster, rollen, gitter, basis){
+  const nr = teile[0].zeilen;
+  const hoehe = (raster && raster.hoehe) || nr.hoehe || 40;
+  rollen = rollen || ['nummer','bezeichnung','ort'];
   let text = '';
 
   /* Mit Raster über das Zeilengesetz, ohne Raster wie in v0.9 über die
      relative Lage - besser als gar keine Tabelle. */
-  const zuB = raster ? zuordnungRaster(raster, nr, bez) : zuordnungFinden(nr, bez, hoehe);
-  const zuO = raster ? zuordnungRaster(raster, nr, ort) : zuordnungFinden(nr, ort, hoehe);
+  const hole = function(sp){
+    if(gitter) return zuordnungLinien(gitter, basis || 0, nr, sp);
+    if(raster) return zuordnungRaster(raster, nr, sp);
+    return zuordnungFinden(nr, sp, hoehe);
+  };
+  const zuord = [null, hole(teile[1].zeilen), hole(teile[2].zeilen)];
+  const zuB = zuord[1], zuO = zuord[2];
+  const benutzt = {1:{}, 2:{}};
 
-  function hole(liste, zuordnung, zi, benutzt){
-    const j = zuordnung.zu[zi];
-    if(j === undefined || j < 0) return null;
-    benutzt[j] = true;
-    return {zeile: liste[j], doppelt:false};
-  }
+  const leerD = function(){ return {text:'', herkunft:'leer', unklar:false, leer:true, roh:''}; };
+  const reihen = [];
+  let erwartet = 1;
+
+  nr.forEach(function(z, zi){
+    const n = nach ? nummerDeuten(z.text, erwartet)
+                   : {text: saeubern(z.text) || '—', roh:z.text, geaendert:false, unklar:false, luecke:0, b:null};
+    if(n.b !== null && n.b !== undefined) erwartet = n.b + 1;
+
+    const roh = {}, restwert = {};
+    [1,2].forEach(function(i){
+      const j = zuord[i].zu[zi];
+      if(j < 0 || j === undefined) return;
+      benutzt[i][j] = true;
+      const r = rollen[i] || 'bezeichnung';
+      roh[r] = teile[i].zeilen[j].text;
+      restwert[r] = (zuord[i].rest && zuord[i].rest[j] !== undefined) ? zuord[i].rest[j] : 0;
+    });
+
+    let bez = leerD(), ort = leerD(), sich = leerD();
+    if(!nach){
+      bez = roh.bezeichnung ? {text:saeubern(roh.bezeichnung), herkunft:'gelesen', unklar:false, leer:false, roh:roh.bezeichnung} : leerD();
+      ort  = roh.ort ? {text:saeubern(roh.ort), herkunft:'gelesen', unklar:false, leer:false, roh:roh.ort} : leerD();
+      sich = roh.absicherung ? {text:saeubern(roh.absicherung), herkunft:'gelesen', unklar:false, leer:false, roh:roh.absicherung} : leerD();
+    } else {
+      if(roh.bezeichnung){
+        const beides = bezUndOrt(roh.bezeichnung);
+        bez = beides.bez; bez.roh = roh.bezeichnung;
+        if(!beides.ort.leer){ ort = beides.ort; ort.roh = roh.bezeichnung; ort.geholt = true; }
+      }
+      if(roh.ort){
+        const o = feldDeuten(roh.ort, ORTE);
+        /* Die alte Regel bleibt: steht in der Ortsspalte ein Wort von der
+           Bezeichnungsliste und hat die Nummer keine Bezeichnung, wandert
+           es hinüber. Fachlich statt geometrisch. */
+        if(bez.leer){
+          const alsBez = feldDeuten(roh.ort, BEZEICHNUNGEN);
+          if(!alsBez.leer && !alsBez.unklar && alsBez.herkunft !== 'frei'){
+            bez = alsBez; bez.roh = roh.ort; bez.geholt = true;
+          } else if(!o.leer){ ort = o; ort.roh = roh.ort; }
+        } else if(!o.leer){ ort = o; ort.roh = roh.ort; }
+      }
+      if(roh.absicherung){ sich = sicherungDeuten(roh.absicherung); sich.roh = roh.absicherung; }
+    }
+
+    /* Verschmolzene Zeile: sitzt ein Eintrag weit neben seiner Zeilenmitte
+       und ist der Nachbar leer, sind es in Wahrheit zwei Zeilen. Gemeldet,
+       nicht aufgelöst - das Auflösen macht die Erkennung über die
+       Wortkästen, hier fehlt dafür die Grundlage. */
+    let hinweis = '';
+    Object.keys(restwert).forEach(function(r){
+      if(Math.abs(restwert[r]) >= 0.33)
+        hinweis = 'sitzt zwischen zwei Zeilen (' + (restwert[r] > 0 ? '+' : '') +
+                  restwert[r].toFixed(2) + ')';
+    });
+
+    reihen.push({n, bez, ort, sich, hinweis, luecke:n.luecke, erw:erwartet});
+  });
+
+  const zeigeOrt  = reihen.some(function(r){ return !r.ort.leer; }) || rollen.indexOf('ort') > 0;
+  const zeigeSich = rollen.indexOf('absicherung') > 0;
 
   const tab = document.createElement('table');
   tab.className = 'erg';
-  tab.innerHTML = '<thead><tr><th>Nr.</th><th>Bezeichnung</th><th>Ort</th></tr></thead>';
+  let kopf = '<thead><tr><th>Nr.</th><th>Bezeichnung</th>';
+  if(zeigeOrt)  kopf += '<th>Ort</th>';
+  if(zeigeSich) kopf += '<th>Absicherung</th>';
+  tab.innerHTML = kopf + '</tr></thead>';
   const koerper = document.createElement('tbody');
-  let erwartet = 1;
+  const breite = 2 + (zeigeOrt?1:0) + (zeigeSich?1:0);
 
-  nr.forEach((z, zi) => {
-    const n = nach ? nummerDeuten(z.text, erwartet)
-                   : {text: saeubern(z.text) || '—', roh:z.text, geaendert:false, unklar:false, luecke:0, b:null};
-    if(n.luecke > 0){
+  reihen.forEach(function(r, idx){
+    if(r.luecke > 0){
       const warn = document.createElement('tr');
       const wtd = document.createElement('td');
-      wtd.colSpan = 3; wtd.className = 'luecke-zeile';
-      wtd.textContent = n.luecke === 1
-        ? 'Hier fehlt eine Zeile – Nummer ' + erwartet + ' wurde nicht gelesen'
-        : 'Hier fehlen ' + n.luecke + ' Zeilen – ab Nummer ' + erwartet;
+      wtd.colSpan = breite; wtd.className = 'luecke-zeile';
+      const ab = reihen[idx].erw - r.luecke - (r.n.b !== null && r.n.b !== undefined ? 0 : 0);
+      wtd.textContent = r.luecke === 1
+        ? 'Hier fehlt eine Zeile – eine Nummer wurde nicht gelesen'
+        : 'Hier fehlen ' + r.luecke + ' Zeilen';
       warn.appendChild(wtd);
       koerper.appendChild(warn);
       text += '[' + wtd.textContent + ']\n';
     }
     const tr = document.createElement('tr');
-    if(n.b !== null && n.b !== undefined) erwartet = n.b + 1;
-    tr.appendChild(zelle(n.text, z.text, n.geaendert, n.unklar, false, 'nr'));
-
-    const bezRef = hole(bez, zuB, zi, benutztB);
-    const ortRef = hole(ort, zuO, zi, benutztO);
-    const leerD = () => ({text:'—', roh:'', geaendert:false, leer:true, unklar:false});
-
-    let bezD = bezRef
-      ? (nach ? textDeuten(bezRef.zeile.text, BEZEICHNUNGEN)
-              : {text:saeubern(bezRef.zeile.text), roh:bezRef.zeile.text, geaendert:false, leer:false, unklar:false})
-      : leerD();
-    let ortD = ortRef
-      ? (nach ? textDeuten(ortRef.zeile.text, ORTE)
-              : {text:saeubern(ortRef.zeile.text), roh:ortRef.zeile.text, geaendert:false, leer:false, unklar:false})
-      : leerD();
-
-    /* Der Spaltenversatz, an dem wir seit dem ersten Foto hängen: auf manchen
-       Schildern sitzt die Bezeichnung geometrisch in der Ortsspalte. Hat eine
-       Nummer keine Bezeichnung, steht aber rechts ein Wort, das auf der
-       Bezeichnungsliste steht, wandert es hinüber. Fachlich statt geometrisch. */
-    let verschoben = false;
-    if(nach && bezD.leer && ortRef && !ortD.text.startsWith('Stromkreis')){
-      const alsBez = textDeuten(ortRef.zeile.text, BEZEICHNUNGEN);
-      if(!alsBez.leer){
-        bezD = alsBez;
-        bezD.geaendert = true;
-        ortD = leerD();
-        verschoben = true;
-      }
-    }
-
-    const roh1 = bezRef && !verschoben ? bezRef.zeile.text : (verschoben ? ortRef.zeile.text : '');
-    tr.appendChild(zelle(bezD.leer ? '—' : bezD.text, roh1,
-                         bezD.geaendert, bezD.unklar,
-                         bezD.leer || (bezRef && bezRef.doppelt), ''));
-    tr.appendChild(zelle(ortD.leer ? '—' : ortD.text, verschoben ? '' : (ortRef ? ortRef.zeile.text : ''),
-                         ortD.geaendert, ortD.unklar,
-                         ortD.leer || (ortRef && ortRef.doppelt && !verschoben), ''));
-    const felder = [n.text, bezD.leer ? '—' : bezD.text, ortD.leer ? '—' : ortD.text];
-    if(verschoben) felder.push('(aus der Ortsspalte geholt)');
+    tr.appendChild(zelle(r.n.text, r.n.roh, r.n.geaendert ? 'korrigiert' : 'gelesen', r.n.unklar, false, 'nr', ''));
+    tr.appendChild(zelle(r.bez.text, r.bez.roh, r.bez.herkunft, r.bez.unklar, r.bez.leer, '', r.hinweis));
+    if(zeigeOrt)
+      tr.appendChild(zelle(r.ort.text, r.ort.geholt ? '' : r.ort.roh, r.ort.herkunft, r.ort.unklar, r.ort.leer, '', ''));
+    if(zeigeSich)
+      tr.appendChild(zelle(r.sich.text, r.sich.roh, r.sich.herkunft, r.sich.unklar, r.sich.leer, '', r.sich.hinweis));
     koerper.appendChild(tr);
+
+    const felder = [r.n.text, r.bez.leer ? '—' : r.bez.text];
+    if(zeigeOrt)  felder.push(r.ort.leer ? '—' : r.ort.text);
+    if(zeigeSich) felder.push(r.sich.leer ? '—' : r.sich.text + (r.sich.hinweis ? ' (' + r.sich.hinweis + ')' : ''));
+    if(r.hinweis) felder.push('(' + r.hinweis + ')');
     text += felder.join(' | ') + '\n';
   });
 
@@ -1839,32 +2472,26 @@ function baueTabelle(teile, nach, raster){
 
   const zaehl = document.createElement('p');
   zaehl.className = 'zaehlung';
-  const leer = [];
-  if(!nr.length)  leer.push('Nummer');
-  if(!bez.length) leer.push('Bezeichnung');
-  if(!ort.length) leer.push('Ort');
-  if(leer.length){
-    zaehl.className += ' krumm';
-    zaehl.textContent = 'Leer geblieben: ' + leer.join(', ') + '.';
-  } else {
-    zaehl.textContent = 'Gefundene Zeilen – Nummer ' + nr.length + ', Bezeichnung ' + bez.length + ', Ort ' + ort.length;
-    if(!(nr.length === bez.length && bez.length === ort.length)){
-      zaehl.className += ' krumm';
-      zaehl.textContent += ' (ungleich)';
-    }
-  }
+  const namen = {nummer:'Nummer', bezeichnung:'Bezeichnung', ort:'Ort', absicherung:'Absicherung'};
+  zaehl.textContent = 'Spalten nach Inhalt: ' + [0,1,2].map(function(i){
+    return (rollen[i] ? namen[rollen[i]] : '?') + ' (' + teile[i].zeilen.length + ')';
+  }).join(', ');
   text = zaehl.textContent + '\n' + text;
   huelle.appendChild(zaehl);
   huelle.appendChild(tab);
 
   const rest = [];
-  bez.forEach((z,i) => { if(zuB.frei[i] && !benutztB[i]) rest.push('Bezeichnung: ' + saeubern(z.text)); });
-  ort.forEach((z,i) => { if(zuO.frei[i] && !benutztO[i]) rest.push('Ort: ' + saeubern(z.text)); });
+  [1,2].forEach(function(i){
+    teile[i].zeilen.forEach(function(z, j){
+      if(zuord[i].zu.indexOf(j) < 0 && !benutzt[i][j])
+        rest.push((namen[rollen[i]] || 'Spalte ' + i) + ': ' + saeubern(z.text));
+    });
+  });
   if(rest.length){
     const h = document.createElement('h3');
     h.className = 'klein'; h.textContent = 'Keiner Nummer zugeordnet';
     const ul = document.createElement('ul');
-    rest.forEach(r => {
+    rest.forEach(function(r){
       const li = document.createElement('li');
       li.style.fontSize = '14px'; li.style.color = '#6B7065';
       li.textContent = r;
@@ -1876,12 +2503,16 @@ function baueTabelle(teile, nach, raster){
   return {knoten: huelle, text, zuB, zuO};
 }
 
-function zelle(text, roh, geaendert, unklar, leer, klasse){
+/* Farbe nach Herkunft: gruen korrigiert, bernstein uebernommen ohne
+   Listentreffer, rot unklar, rot-kursiv leer. Damit bleibt Jeans Grundsatz
+   sichtbar - nur eben mit einer Stufe mehr als vorher. */
+function zelle(text, roh, herkunft, unklar, leer, klasse, hinweis){
   const td = document.createElement('td');
   if(klasse) td.className = klasse;
   const s = document.createElement('span');
-  s.textContent = text;
-  if(geaendert) s.className = 'geaendert';
+  s.textContent = leer ? '\u2014' : (text || '\u2014');
+  if(herkunft === 'korrigiert') s.className = 'geaendert';
+  if(herkunft === 'frei') s.className = 'frei';
   if(unklar) s.className = 'unklar';
   if(leer) s.className = 'leer';
   td.appendChild(s);
@@ -1890,6 +2521,12 @@ function zelle(text, roh, geaendert, unklar, leer, klasse){
     r.className = 'klein-roh';
     r.textContent = 'gelesen: ' + roh;
     td.appendChild(r);
+  }
+  if(hinweis){
+    const h = document.createElement('span');
+    h.className = 'klein-roh anmerkung';
+    h.textContent = hinweis;
+    td.appendChild(h);
   }
   return td;
 }
@@ -1970,10 +2607,11 @@ document.getElementById('ernteDatei').addEventListener('change', async function(
     const teile = teileAusErnte(roh);
     const raster = rasterBauen(teile[0].zeilen);
     const nach = document.getElementById('optNach').checked;
+    const rv = rollenVerteilen(teile);
 
     const ziel = document.getElementById('tabelle');
     ziel.innerHTML = '';
-    const gebaut = baueTabelle(teile, nach, raster);
+    const gebaut = baueTabelle(teile, nach, raster, rv.rollen, null, 0);
     ziel.appendChild(gebaut.knoten);
 
     const neu = ernteBauen(teile, raster, gebaut.zuB, gebaut.zuO, {
@@ -1982,7 +2620,8 @@ document.getElementById('ernteDatei').addEventListener('change', async function(
       winkel: roh.quelle ? roh.quelle.schraeglage : 0,
       modell: roh.quelle ? roh.quelle.modell : '',
       schwelle: roh.quelle ? roh.quelle.schwelle : '',
-      grenzen: null, datei: roh.quelle ? roh.quelle.datei : ''
+      grenzen: null, datei: roh.quelle ? roh.quelle.datei : '',
+      rollen: rv.rollen, guete: rv.guete
     });
     const wann = (roh.erzeugt || '').replace('T',' ').substring(0,16);
     ernteAnzeigen(neu, 'Geladen aus einer Ernte vom ' + wann + ' (' + (roh.app||'?') + '), ohne Foto. Raster und Zuordnung neu gerechnet.');
