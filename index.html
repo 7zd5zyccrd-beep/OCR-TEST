@@ -1,7 +1,49 @@
 <!DOCTYPE html>
 <!--
   PaddleOCR-Test · Verteilerbeschreibung
-  v0.15 · 21.09.2026
+  v0.16 · 21.09.2026
+
+  v0.16: zwei Linienspuren, und die Nummernspalte entscheidet.
+
+  Anlass war Jeans erstes Schild (elektro Dewitz). Dort kam gar kein
+  Linienraster zustande - 3 lange Striche -, die Zuordnung lief auf das
+  Zeilengesetz zurueck, und die Ortsspalte sass durchgehend eine Zeile zu
+  hoch. Drei Befunde:
+
+  1. Otsu trennt global. Auf diesem Foto trennt es helles Papier von grauer
+     Wand: 24,7 % des Bildes gelten als dunkel, die blassen Tabellenlinien
+     fallen auf die Papierseite. Die zweite Spur schaetzt das Papier deshalb
+     ueber das lokale MAXIMUM - hell ist, was in der Nachbarschaft am
+     hellsten ist. Ein fetter Buchstabe zieht den Bezugswert dann nicht nach
+     unten, und der blasse Strich daneben hebt sich weiter ab: 3 Linien
+     werden zu 26. Auf Blatt 2 ist es umgekehrt (53 gegen 36), also laufen
+     beide Spuren und es gewinnt die, mit der die Nummernspalte aufgeht.
+
+  2. Ein 1 Bildpunkt duenner Strich reisst schon bei leicht danebenliegender
+     Scherung ab und zerfaellt in 150-Punkt-Stuecke. Die Spur wird deshalb
+     vor der Laufsuche um einen Bildpunkt senkrecht gedehnt.
+
+  3. Wichtigster Punkt: JEDE fehlende Linie verschiebt alles darunter um eine
+     Zeile. Das Raster darf deshalb nicht allein entscheiden. Neu ist die
+     Kreuzprobe mit der Ankerspalte: aufeinanderfolgende Nummern stehen auf
+     dem Papier in aufeinanderfolgenden Zeilen. Liegen zwei im selben Feld,
+     fehlt dazwischen eine Linie und wird aus den Nachbarn gemittelt
+     eingesetzt; wird ein Feld uebersprungen, ist eine Linie zu viel und
+     faellt weg. Am Dewitz-Schild: ohne Kreuzprobe 10 von 21 Feldern richtig,
+     mit ihr 17. Blatt 2 bleibt bei 63 von 63.
+
+  Und wenn es nicht aufgeht, steht das jetzt UEBER der Tabelle statt klein im
+  Rohtext: ohne Linienraster kann die Zuordnung um ganze Zeilen verschoben
+  sein. Genau das ist dem Dewitz-Schild passiert, ohne dass man es sah.
+
+  Offen und fuer die naechste Etappe vorgemerkt, beides von Jean:
+   - Der aeussere Rahmen der Tabelle wird zuverlaessig erkannt. Aus ihm
+     liesse sich die Perspektive ableiten und damit auch jede nur teilweise
+     gefundene Linie sauber ueber die ganze Breite fortsetzen - daran haengen
+     die 4 Felder, die am Dewitz-Schild noch fehlen.
+   - Die Buchstaben werden mit zunehmender Entfernung kleiner. Die Schrifthoehe
+     ist damit ein Mass fuer die Tiefe und koennte die Zeilen selbst tragen,
+     wo Linien fehlen.
 
   v0.15: Fehlerbehebung an v0.14. "Cannot access 'r' before initialization" -
   die neue Zeilennummer hiess r, und die Spaltenrolle in derselben Klammer
@@ -375,7 +417,7 @@
 
   <header>
     <h1>PaddleOCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.15 · 21.09.2026</span>
+    <span class="ver">v0.16 · 21.09.2026</span>
   </header>
 
   <div class="karte">
@@ -501,7 +543,7 @@ const MODELLE = {
   latin: {name:'v5 lateinisch',  konstante:'V5_LATIN_MOBILE_MODEL'}
 };
 
-const VERSION = 'v0.15 · 21.09.2026';
+const VERSION = 'v0.16 · 21.09.2026';
 
 /* ==================== Schrittliste ==================== */
 
@@ -825,17 +867,60 @@ function halbBild(canvas){
   return {g, W, H, hist, n:W*H};
 }
 
-function linienFinden(canvas){
-  const t0 = jetzt();
-  const b = halbBild(canvas);
+/* Zwei Spuren, weil eine Schwelle nicht auf beide Blätter passt.
+
+   Otsu trennt global. Auf Jeans zweitem Blatt trifft das die dunklen
+   Tabellenlinien genau; auf dem Dewitz-Schild trennt es helles Papier von
+   grauer Wand - 24,7 % des Bildes gelten dort als dunkel - und findet
+   3 statt 26 Linien.
+
+   Die zweite Spur schätzt das Papier über das lokale MAXIMUM: hell ist,
+   was in der Nachbarschaft am hellsten ist. Ein fetter Buchstabe zieht
+   damit den Bezugswert nicht nach unten, und der blasse Strich daneben
+   hebt sich weiterhin ab. Umgekehrt findet diese Spur auf Blatt 2 nur
+   36 statt 53 Linien.
+
+   Also laufen beide, und die Nummernspalte entscheidet (siehe
+   kreuzpruefen). Gemessen: Dewitz 3 gegen 26, Blatt 2 53 gegen 36 - die
+   Entscheidung fällt jedes Mal eindeutig aus. */
+function spurOtsu(b){
   const s = otsu(b.hist, b.n);
+  const d = new Uint8Array(b.n);
+  for(let i=0;i<b.n;i++) if(b.g[i] < s) d[i] = 1;
+  return d;
+}
+
+function spurLokal(b, abstand){
+  const W = b.W, H = b.H, R = 10;
+  const d = new Uint8Array(b.n);
+  for(let x=0;x<W;x++){
+    for(let y=0;y<H;y++){
+      let m = 0;
+      const von = y-R < 0 ? 0 : y-R, bis = y+R >= H ? H-1 : y+R;
+      for(let yy=von; yy<=bis; yy++){ const v = b.g[yy*W+x]; if(v > m) m = v; }
+      if(m - b.g[y*W+x] > abstand) d[y*W+x] = 1;
+    }
+  }
+  return d;
+}
+
+function linienAus(dunkel, b){
   const W = b.W, H = b.H;
-  const dunkel = new Uint8Array(b.n);
-  for(let i=0;i<b.n;i++) if(b.g[i] < s) dunkel[i] = 1;
 
   /* Langer Lauf in einundzwanzig Scherungen */
   const maske = new Uint8Array(b.n);
   const MIN = Math.max(18, Math.round(W*0.035));
+  /* Einen Bildpunkt senkrecht dehnen: ein 1 Punkt dünner Strich reißt sonst
+     schon bei leicht danebenliegender Scherung ab. Am Dewitz-Schild zerfielen
+     die Linien damit in 150-Punkt-Stücke statt über 700 zu laufen. */
+  const gedehnt = new Uint8Array(b.n);
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+    if(!dunkel[y*W+x]) continue;
+    gedehnt[y*W+x] = 1;
+    if(y > 0) gedehnt[(y-1)*W+x] = 1;
+    if(y < H-1) gedehnt[(y+1)*W+x] = 1;
+  }
+  dunkel = gedehnt;
   const off = new Int32Array(W);
   for(let is=-12; is<=8; is++){
     const st = is*0.025;
@@ -924,7 +1009,88 @@ function linienFinden(canvas){
                  mitte: ys.reduce((a,v)=>a+v,0)/ys.length});
   }
   linien.sort((a,b2) => a.mitte - b2.mitte);
-  return {linien, dauer: jetzt()-t0, gebilde: nr};
+  return linien;
+}
+
+function feldIn(linien, x, y){
+  let oben = null;
+  for(let i=0;i<linien.length;i++){
+    const yy = linieBei(linien[i], x);
+    if(yy <= y) oben = {i, yy};
+    else if(oben !== null) return {i:oben.i, lage:(y-oben.yy)/Math.max(1e-6, yy-oben.yy)};
+    else return null;
+  }
+  return null;
+}
+
+/* Kreuzprobe mit der Ankerspalte - der Teil, der in v0.12 bis v0.15 gefehlt
+   hat. Aufeinanderfolgende Nummern stehen auf dem Papier in
+   aufeinanderfolgenden Zeilen. Liegen zwei im SELBEN Feld, fehlt dazwischen
+   eine Linie; wird ein Feld ÜBERSPRUNGEN, ist eine Linie zu viel gefunden
+   worden. Beides lässt sich an Ort und Stelle beheben, und wenn nicht, weiß
+   die App wenigstens, dass sie es nicht weiß.
+
+   Am Dewitz-Schild: ohne Kreuzprobe 10 von 21 Feldern richtig, mit ihr 17. */
+function kreuzpruefen(linien, anker){
+  let lin = linien.slice();
+  let ergaenzt = 0, entfernt = 0;
+  for(let runde=0; runde<12; runde++){
+    const f = [];
+    for(let i=0;i<anker.length;i++){
+      const t = feldIn(lin, anker[i].x, anker[i].y);
+      if(!t) return {linien:lin, stand:'anker-aussen', felder:null, ergaenzt, entfernt};
+      f.push(t.i);
+    }
+    let schlimm = -1, art = 0;
+    for(let i=0;i+1<f.length;i++){
+      const d = f[i+1]-f[i];
+      if(d !== 1){ schlimm = i; art = d; break; }
+    }
+    if(schlimm < 0) return {linien:lin, stand:'stimmig', felder:f, ergaenzt, entfernt};
+    if(art === 0){
+      /* fehlende Linie: aus den beiden Nachbarn gemittelt einsetzen */
+      const A = lin[f[schlimm]], B = lin[f[schlimm]+1];
+      if(!A || !B) return {linien:lin, stand:'uneinig', felder:f, ergaenzt, entfernt};
+      const von = Math.min(A.xs[0], B.xs[0]), bis = Math.max(A.xs[A.xs.length-1], B.xs[B.xs.length-1]);
+      const xs = [], ys = [];
+      for(let x=von; x<=bis; x+=4){ xs.push(x); ys.push((linieBei(A,x)+linieBei(B,x))/2); }
+      if(xs.length < 2) return {linien:lin, stand:'uneinig', felder:f, ergaenzt, entfernt};
+      lin = lin.slice(0, f[schlimm]+1).concat([{xs, ys, x0:xs[0], x1:xs[xs.length-1],
+              mitte:(ys[0]+ys[ys.length-1])/2, ergaenzt:true}], lin.slice(f[schlimm]+1));
+      ergaenzt++;
+    } else if(art >= 2){
+      lin = lin.slice(0, f[schlimm]+1).concat(lin.slice(f[schlimm]+2));
+      entfernt++;
+    } else {
+      return {linien:lin, stand:'uneinig', felder:f, ergaenzt, entfernt};
+    }
+  }
+  return {linien:lin, stand:'uneinig', felder:null, ergaenzt, entfernt};
+}
+
+/* Beide Spuren durchrechnen und die nehmen, mit der die Nummernspalte
+   aufgeht. Gehen beide auf, gewinnt die mit mehr Linien. */
+function linienFinden(canvas, nrZeilen){
+  const t0 = jetzt();
+  const b = halbBild(canvas);
+  const anker = nrZeilen.map(function(z){ return {x:mitteX(z), y:z.mitte}; });
+  const proben = [
+    {name:'Otsu', linien: linienAus(spurOtsu(b), b)},
+    {name:'lokales Maximum', linien: linienAus(spurLokal(b, 10), b)}
+  ];
+  let bester = null;
+  proben.forEach(function(p){
+    const pr = kreuzpruefen(p.linien, anker);
+    const wert = {name:p.name, gefunden:p.linien.length, linien:pr.linien,
+                  stand:pr.stand, ergaenzt:pr.ergaenzt, entfernt:pr.entfernt};
+    if(!bester) { bester = wert; return; }
+    const besser = (wert.stand === 'stimmig' && bester.stand !== 'stimmig') ||
+                   (wert.stand === bester.stand && wert.linien.length > bester.linien.length);
+    if(besser) bester = wert;
+  });
+  bester.dauer = jetzt()-t0;
+  bester.proben = proben.map(function(p){ return p.name + ' ' + p.linien.length; }).join(', ');
+  return bester;
 }
 
 /* Höhe einer Linie an der Stelle x. Außerhalb ihres eigenen Bereichs wird
@@ -953,7 +1119,7 @@ function linieBei(L, x){
    durchgezogene Linien fällt hier durch und bekommt das Zeilengesetz. */
 function gitterBauen(erg, breite){
   const mitte = breite/2;
-  const roh = erg.linien.slice().sort(function(a,b){
+  const roh = (erg.linien || []).slice().sort(function(a,b){
     return linieBei(a, mitte) - linieBei(b, mitte);
   });
   if(roh.length < 8) return null;
@@ -976,7 +1142,7 @@ function gitterBauen(erg, breite){
 
   return {
     linien, hoehe: h, anzahl: linien.length,
-    gleich: gut/d2.length, dauer: erg.dauer,
+    gleich: gut/d2.length, dauer: erg.dauer || 0, stand: erg.stand || '',
     /* In welchem Feld liegt der Punkt? Und wie weit vom Rand? */
     feld: function(x, y){
       let oben = null;
@@ -1789,7 +1955,7 @@ function verarbeite(erg, arbeit, winkel, leseDauer){
   ziel.innerHTML = '';
   let tabellenText = '';
   let messText = '';
-  let raster = null, gitter = null, basis = 0, persp = null;
+  let raster = null, gitter = null, basis = 0, persp = null, linienStand = null;
   const linienAn = document.getElementById('optLinien').checked;
   if(gruppen){
     const teile = [
@@ -1815,7 +1981,8 @@ function verarbeite(erg, arbeit, winkel, leseDauer){
     /* Ebene 2 zuerst: die gedruckten Linien. Nur wenn sie ausfallen,
        kommt das Zeilengesetz aus der Nummernspalte zum Zug. */
     if(linienAn){
-      const lf = linienFinden(arbeit);
+      const lf = linienFinden(arbeit, nrZ);
+      linienStand = lf;
       gitter = gitterBauen(lf, arbeit.width);
       let deckung = 0;
       if(gitter){
@@ -1835,11 +2002,15 @@ function verarbeite(erg, arbeit, winkel, leseDauer){
           gitter = null;
         }
       }
+      mess.push('Linienspuren: ' + lf.proben + ' -> gewählt: ' + lf.name +
+                ', Kreuzprobe mit der Nummernspalte: ' + lf.stand +
+                (lf.ergaenzt ? ', ' + lf.ergaenzt + ' Linie(n) ergänzt' : '') +
+                (lf.entfernt ? ', ' + lf.entfernt + ' entfernt' : ''));
       mess.push(gitter
         ? 'Linienraster: ' + gitter.anzahl + ' Linien, Zeilenhöhe ' + Math.round(gitter.hoehe) +
           ' px, Abstände gleichmäßig zu ' + Math.round(gitter.gleich*100) + ' %, deckt ' +
           Math.round(100*deckung/Math.max(1,nrZ.length)) + ' % der Nummern ab, ' +
-          Math.round(gitter.dauer) + ' ms'
+          Math.round(lf.dauer) + ' ms'
         : 'Linienraster: keins zustande gekommen (' + lf.linien.length + ' lange Striche gefunden)');
       if(gitter){
         persp = perspektiveFitten(gitter);
@@ -1861,7 +2032,12 @@ function verarbeite(erg, arbeit, winkel, leseDauer){
     mess.push('Zeilen kommen von: ' + (gitter ? 'den gedruckten Linien' : (raster ? 'dem Zeilengesetz der Nummernspalte' : 'nichts – Zuordnung wie in v0.9')));
 
     const rv = rollenVerteilen(teile);
-    const gebaut = baueTabelle(teile, nach, raster, rv.rollen, gitter, basis);
+    /* Ohne Linienraster kann die Zuordnung um ganze Zeilen verschoben sein -
+       das ist keine Feinheit, sondern der Fehler, der dem Dewitz-Schild die
+       ganze Ortsspalte verschoben hat. Deshalb steht es über der Tabelle. */
+    const warnung = gitter ? '' :
+      'Ohne Linienraster: die Spalten sind über die Nummernfolge geschätzt und können um ganze Zeilen verschoben sein.';
+    const gebaut = baueTabelle(teile, nach, raster, rv.rollen, gitter, basis, warnung);
     ziel.appendChild(gebaut.knoten);
     tabellenText = gebaut.text;
 
@@ -1872,8 +2048,13 @@ function verarbeite(erg, arbeit, winkel, leseDauer){
       grenzen, datei: letzterDateiname, rollen: rv.rollen, guete: rv.guete,
       zeilenquelle: gitter ? {art:'linien', anzahl:gitter.anzahl, hoehe:Math.round(gitter.hoehe),
                               gleich:Math.round(gitter.gleich*100),
+                              spur: linienStand ? linienStand.name : null,
+                              kreuzprobe: linienStand ? linienStand.stand : null,
+                              ergaenzt: linienStand ? linienStand.ergaenzt : 0,
+                              entfernt: linienStand ? linienStand.entfernt : 0,
                               perspektive: persp ? Math.round(persp.mittel*100)/100 : null}
-                           : {art:'nummerngesetz'}
+                           : {art:'nummerngesetz', spur: linienStand ? linienStand.name : null,
+                              kreuzprobe: linienStand ? linienStand.stand : null}
     });
     ernteAnzeigen(ernte, null);
     mess.push('');
@@ -2433,7 +2614,7 @@ function rollenVerteilen(teile){
 
 /* ==================== Tabelle bauen ==================== */
 
-function baueTabelle(teile, nach, raster, rollen, gitter, basis){
+function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
   const nr = teile[0].zeilen;
   const hoehe = (raster && raster.hoehe) || nr.hoehe || 40;
   rollen = rollen || ['nummer','bezeichnung','ort'];
@@ -2597,6 +2778,15 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis){
   tab.appendChild(koerper);
   const huelle = document.createElement('div');
 
+  if(warnung){
+    const w = document.createElement('p');
+    w.className = 'zaehlung krumm';
+    w.style.fontSize = '15px';
+    w.textContent = warnung;
+    huelle.appendChild(w);
+    text = warnung + '\n' + text;
+  }
+
   const zaehl = document.createElement('p');
   zaehl.className = 'zaehlung';
   const namen = {nummer:'Nummer', bezeichnung:'Bezeichnung', ort:'Ort', absicherung:'Absicherung'};
@@ -2740,7 +2930,8 @@ document.getElementById('ernteDatei').addEventListener('change', async function(
 
     const ziel = document.getElementById('tabelle');
     ziel.innerHTML = '';
-    const gebaut = baueTabelle(teile, nach, raster, rv.rollen, null, 0);
+    const gebaut = baueTabelle(teile, nach, raster, rv.rollen, null, 0,
+      'Aus einer gesicherten Ernte geladen – ohne Bild gibt es keine Linien, die Zuordnung kann um ganze Zeilen verschoben sein.');
     ziel.appendChild(gebaut.knoten);
 
     const neu = ernteBauen(teile, raster, gebaut.zuB, gebaut.zuO, {
