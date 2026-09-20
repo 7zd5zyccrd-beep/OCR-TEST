@@ -1,7 +1,21 @@
 <!DOCTYPE html>
 <!--
   PaddleOCR-Test · Verteilerbeschreibung
-  v0.13 · 21.09.2026
+  v0.14 · 21.09.2026
+
+  v0.14: die Tabelle kommt aus dem Raster statt aus der Nummernspalte.
+
+  In v0.13 stimmte die Ernte erstmals vollstaendig - Zeile 37 bis 48, alle
+  zwoelf Bezeichnungen und Absicherungen am richtigen Platz, groesster
+  Restfehler 0,14 Zeilen. Die TABELLE zeigte davon nur bis 44, weil sie ueber
+  die gelesenen Nummern lief und die Engine 45 bis 48 nicht gelesen hatte.
+  Der zweite FI-Schutzschalter und drei Absicherungen standen deshalb unter
+  "keiner Nummer zugeordnet", obwohl sie laengst richtig einsortiert waren.
+
+  Jetzt laeuft die Tabelle ueber die Zeilen des Rasters. Wo keine Nummer
+  gelesen wurde, wird sie fortgezaehlt und als abgeleitet gekennzeichnet -
+  bernsteinfarben, mit dem Vermerk "Nummer aus dem Raster" und einem Stern im
+  kopierten Text. Ohne Raster bleibt alles wie bisher.
 
   v0.13: Fehlerbehebung an v0.12. Auf Jeans iPhone fand die Linienerkennung
   nur 12 statt 52 Linien, alle im oberen Blattdrittel; darunter war fuer jede
@@ -357,7 +371,7 @@
 
   <header>
     <h1>PaddleOCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.13 · 21.09.2026</span>
+    <span class="ver">v0.14 · 21.09.2026</span>
   </header>
 
   <div class="karte">
@@ -483,7 +497,7 @@ const MODELLE = {
   latin: {name:'v5 lateinisch',  konstante:'V5_LATIN_MOBILE_MODEL'}
 };
 
-const VERSION = 'v0.13 · 21.09.2026';
+const VERSION = 'v0.14 · 21.09.2026';
 
 /* ==================== Schrittliste ==================== */
 
@@ -2436,15 +2450,55 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis){
   const reihen = [];
   let erwartet = 1;
 
-  nr.forEach(function(z, zi){
-    const n = nach ? nummerDeuten(z.text, erwartet)
-                   : {text: saeubern(z.text) || '—', roh:z.text, geaendert:false, unklar:false, luecke:0, b:null};
+  /* Zeilenweise statt nummernweise. Das Linienraster kennt auch die Zeilen, in
+     denen gar keine Nummer gelesen wurde - auf Jeans Blatt 45 bis 48, wo der
+     zweite FI-Schutzschalter und drei Absicherungen stehen. Solange die
+     Tabelle aus der Nummernspalte gebaut wurde, verschwand das alles unter
+     "keiner Nummer zugeordnet", obwohl es längst richtig einsortiert war. */
+  const nachZeile = {}, spalteNachZeile = {1:{}, 2:{}};
+  const reihenListe = [];
+  if(gitter){
+    nr.forEach(function(z, zi){
+      const f = gitter.feld(mitteX(z), z.mitte);
+      if(f) nachZeile[f.i - (basis||0)] = zi;
+    });
+    const alle = {};
+    Object.keys(nachZeile).forEach(function(r){ alle[r] = true; });
+    [1,2].forEach(function(i){
+      if(!zuord[i].zeile) return;
+      zuord[i].zeile.forEach(function(r, j){
+        if(r === null || r === undefined) return;
+        spalteNachZeile[i][r] = j; alle[r] = true;
+      });
+    });
+    const sch = Object.keys(alle).map(Number).sort(function(a,b){ return a-b; });
+    if(sch.length)
+      for(let r=sch[0]; r<=sch[sch.length-1]; r++)
+        reihenListe.push({r, zi: nachZeile[r] === undefined ? -1 : nachZeile[r]});
+  } else {
+    nr.forEach(function(z, zi){ reihenListe.push({r:zi, zi}); });
+  }
+
+  reihenListe.forEach(function(eintrag){
+    const zi = eintrag.zi, r = eintrag.r;
+    let n;
+    if(zi >= 0){
+      const z = nr[zi];
+      n = nach ? nummerDeuten(z.text, erwartet)
+               : {text: saeubern(z.text) || '—', roh:z.text, geaendert:false, unklar:false, luecke:0, b:null};
+      n.herkunft = n.geaendert ? 'korrigiert' : 'gelesen';
+    } else {
+      /* Keine Nummer gelesen, aber das Raster sagt: hier ist eine Zeile.
+         Die Nummer wird fortgezählt und als abgeleitet gekennzeichnet. */
+      n = {text:String(erwartet), roh:'', geaendert:false, unklar:false, luecke:0,
+           b:erwartet, herkunft:'frei', abgeleitet:true};
+    }
     if(n.b !== null && n.b !== undefined) erwartet = n.b + 1;
 
     const roh = {}, restwert = {};
     [1,2].forEach(function(i){
-      const j = zuord[i].zu[zi];
-      if(j < 0 || j === undefined) return;
+      const j = gitter ? spalteNachZeile[i][r] : zuord[i].zu[zi];
+      if(j === undefined || j < 0) return;
       benutzt[i][j] = true;
       const r = rollen[i] || 'bezeichnung';
       roh[r] = teile[i].zeilen[j].text;
@@ -2488,7 +2542,8 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis){
                   restwert[r].toFixed(2) + ')';
     });
 
-    reihen.push({n, bez, ort, sich, hinweis, luecke:n.luecke, erw:erwartet});
+    reihen.push({n, bez, ort, sich, hinweis, luecke:n.luecke, erw:erwartet,
+                 abgeleitet:!!n.abgeleitet});
   });
 
   const zeigeOrt  = reihen.some(function(r){ return !r.ort.leer; }) || rollen.indexOf('ort') > 0;
@@ -2517,7 +2572,8 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis){
       text += '[' + wtd.textContent + ']\n';
     }
     const tr = document.createElement('tr');
-    tr.appendChild(zelle(r.n.text, r.n.roh, r.n.geaendert ? 'korrigiert' : 'gelesen', r.n.unklar, false, 'nr', ''));
+    tr.appendChild(zelle(r.n.text, r.n.roh, r.n.herkunft || 'gelesen', r.n.unklar, false, 'nr',
+                         r.abgeleitet ? 'Nummer aus dem Raster' : ''));
     tr.appendChild(zelle(r.bez.text, r.bez.roh, r.bez.herkunft, r.bez.unklar, r.bez.leer, '', r.hinweis));
     if(zeigeOrt)
       tr.appendChild(zelle(r.ort.text, r.ort.geholt ? '' : r.ort.roh, r.ort.herkunft, r.ort.unklar, r.ort.leer, '', ''));
@@ -2525,7 +2581,7 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis){
       tr.appendChild(zelle(r.sich.text, r.sich.roh, r.sich.herkunft, r.sich.unklar, r.sich.leer, '', r.sich.hinweis));
     koerper.appendChild(tr);
 
-    const felder = [r.n.text, r.bez.leer ? '—' : r.bez.text];
+    const felder = [r.n.text + (r.abgeleitet ? '*' : ''), r.bez.leer ? '—' : r.bez.text];
     if(zeigeOrt)  felder.push(r.ort.leer ? '—' : r.ort.text);
     if(zeigeSich) felder.push(r.sich.leer ? '—' : r.sich.text + (r.sich.hinweis ? ' (' + r.sich.hinweis + ')' : ''));
     if(r.hinweis) felder.push('(' + r.hinweis + ')');
@@ -2538,9 +2594,11 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis){
   const zaehl = document.createElement('p');
   zaehl.className = 'zaehlung';
   const namen = {nummer:'Nummer', bezeichnung:'Bezeichnung', ort:'Ort', absicherung:'Absicherung'};
+  const abg = reihen.filter(function(r){ return r.abgeleitet; }).length;
   zaehl.textContent = 'Spalten nach Inhalt: ' + [0,1,2].map(function(i){
     return (rollen[i] ? namen[rollen[i]] : '?') + ' (' + teile[i].zeilen.length + ')';
-  }).join(', ');
+  }).join(', ') + ' · ' + reihen.length + ' Zeilen' +
+  (abg ? ', davon ' + abg + ' mit abgeleiteter Nummer (*)' : '');
   text = zaehl.textContent + '\n' + text;
   huelle.appendChild(zaehl);
   huelle.appendChild(tab);
