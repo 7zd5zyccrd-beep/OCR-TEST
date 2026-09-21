@@ -1,7 +1,23 @@
 <!DOCTYPE html>
 <!--
   PaddleOCR-Test · Verteilerbeschreibung
-  v0.20 · 21.09.2026
+  v0.21 · 21.09.2026
+
+  v0.21: Entzerren vor dem Lesen, aus den Textzeilen (Jeans Gedanke: auf dem
+  Papier laufen die Zeilen parallel, im Bild faechern sie auf). Anlass war
+  das Muench-Blatt in der aufgeschwenkten Tuer - Textzeilen von 0,3 bis fast
+  18 Grad, ein einziger Fluchtpunkt erklaert sie mit 0,3 Grad. Nach dem
+  Geradeziehen steht jede Angabe neben ihrer Nummer.
+
+  Nur bei echtem Faecher, mindestens acht Zeilenstuecken und hoechstens einem
+  Grad Abweichung; Ausreisser (eine schraeg gedruckte Fusszeile) fliegen raus.
+  Laufen die Zeilen parallel, bleibt es bei der Drehung, deren Suche von
+  +-5 auf +-15 Grad geoeffnet ist. Vorgerechnet an allen vier Blaettern:
+  Schmidtgen (30 Stuecke, 0,18 Grad) und Muench (19 Stuecke, 0,27 Grad)
+  werden entzerrt, Blatt 2 (Tabelle haengt zu einem Gebilde zusammen) und
+  Dewitz (nach Ausreisserpruefung nur 7 Stuecke) bleiben bei der Drehung und
+  damit exakt beim bisherigen, richtigen Stand. Welcher Weg genommen wurde,
+  steht im Rohtext, in den Kennzahlen und in der Ernte.
 
   v0.20: die Nachlese auch fuer LEERE Felder. Stand der Sammlung mit v0.19:
   Dewitz 11 von 11, Schmidtgen 14 von 14, Blatt 2 45 von 48 - dort fehlen
@@ -520,7 +536,7 @@
 
   <header>
     <h1>PaddleOCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.20 · 21.09.2026</span>
+    <span class="ver">v0.21 · 21.09.2026</span>
   </header>
 
   <div class="karte">
@@ -648,7 +664,7 @@ const MODELLE = {
   latin: {name:'v5 lateinisch',  konstante:'V5_LATIN_MOBILE_MODEL'}
 };
 
-const VERSION = 'v0.20 · 21.09.2026';
+const VERSION = 'v0.21 · 21.09.2026';
 
 /* ==================== Schrittliste ==================== */
 
@@ -823,7 +839,8 @@ function schraeglage(canvas){
   for(let i=0;i<t.n;i++) bin[i] = t.grau[i] < s ? 1 : 0;
 
   let bester = 0, besteVar = -1;
-  for(let grad = -5; grad <= 5.0001; grad += 0.25){
+  /* v0.21: +-15 statt +-5 Grad - das Münch-Blatt meldete genau den Rand. */
+  for(let grad = -15; grad <= 15.0001; grad += 0.25){
     const m = Math.tan(grad*Math.PI/180);
     const prof = new Float64Array(h);
     for(let x=0;x<br;x++){
@@ -844,6 +861,186 @@ function schraeglage(canvas){
   }
   return bester;
 }
+
+/* ==================== Entzerren vor dem Lesen ====================
+
+   v0.21, Jeans Gedanke: auf dem Papier laufen die Textzeilen parallel. Im
+   Foto fächern sie auf, und aus diesem Fächer lässt sich die Perspektive
+   bestimmen - ganz ohne Tabellenlinien. Das Bild wird geradegezogen, BEVOR
+   die Erkennung es sieht.
+
+   Anlass war das Münch-Blatt in der aufgeschwenkten Verteilertür: dort
+   kippen die Textzeilen von 0,3 Grad oben bis fast 18 Grad unten, und ein
+   einziger Fluchtpunkt erklärt alle mit 0,3 Grad Abweichung. Danach liegen
+   sie im Mittel unter einem halben Grad schief - und "Küche", der Ort des
+   FI 19-20, steht wieder neben dem FI statt auf Höhe von Zeile 21.
+
+   Gemessen wird auf halber Auflösung: Papier über das lokale Maximum, Tinte
+   ist, was deutlich dunkler ist, Lücken innerhalb einer Zeile werden
+   geschlossen, bis aus Wörtern Zeilenstücke werden, und jedem Stück wird eine
+   Gerade angepasst. Aus allen Geraden der Fluchtpunkt - und was nicht dazu
+   passt, fliegt raus und es wird neu gerechnet (auf dem Dewitz-Schild steht
+   unten eine Zeile schräg aufs Papier gedruckt).
+
+   Entzerrt wird nur bei echtem Fächer, mindestens acht Stücken und höchstens
+   einem Grad Abweichung. Laufen die Zeilen parallel, ist es ein verdrehtes
+   Foto und die Drehung ist das richtige Werkzeug. Tabellenblätter bleiben
+   ebenfalls bei der Drehung: dort hängt die Tabelle über die senkrechten
+   Striche zu einem Gebilde zusammen, und die gedruckten Linien erledigen
+   die Perspektive ohnehin (Ebene 2). An allen vier Blättern vorgerechnet:
+   Schmidtgen und Münch werden entzerrt, Blatt 2 und Dewitz bleiben, wie sie
+   sind. */
+function maxFilter(g, W, H, r){
+  const t = new Uint8Array(W*H), o = new Uint8Array(W*H);
+  for(let y=0;y<H;y++){
+    const z = y*W;
+    for(let x=0;x<W;x++){
+      let m = 0;
+      const a = x-r < 0 ? 0 : x-r, b = x+r >= W ? W-1 : x+r;
+      for(let k=a;k<=b;k++){ const v = g[z+k]; if(v > m) m = v; }
+      t[z+x] = m;
+    }
+  }
+  for(let x=0;x<W;x++){
+    for(let y=0;y<H;y++){
+      let m = 0;
+      const a = y-r < 0 ? 0 : y-r, b = y+r >= H ? H-1 : y+r;
+      for(let k=a;k<=b;k++){ const v = t[k*W+x]; if(v > m) m = v; }
+      o[y*W+x] = m;
+    }
+  }
+  return o;
+}
+
+function textzeilenMessen(canvas){
+  const b = halbBild(canvas);
+  const W = b.W, H = b.H, n = b.n;
+  const papier = maxFilter(b.g, W, H, 7);
+  const tinte = new Uint8Array(n);
+  for(let i=0;i<n;i++) if(papier[i] - b.g[i] > 60) tinte[i] = 1;
+  const zu = tinte.slice();
+  for(let y=0;y<H;y++){
+    const z = y*W; let letzte = -1000;
+    for(let x=0;x<W;x++){
+      if(tinte[z+x]){
+        if(x - letzte > 1 && x - letzte <= 21) for(let k=letzte+1;k<x;k++) zu[z+k] = 1;
+        letzte = x;
+      }
+    }
+  }
+  const marke = new Int32Array(n).fill(-1), stapel = new Int32Array(n);
+  const stuecke = [];
+  for(let start=0, nr=0; start<n; start++){
+    if(!zu[start] || marke[start] >= 0) continue;
+    let sp = 0; stapel[sp++] = start; marke[start] = nr;
+    let x0 = W, x1 = 0, y0 = H, y1 = 0, sx = 0, sy = 0, sxx = 0, sxy = 0, cnt = 0;
+    while(sp > 0){
+      const p = stapel[--sp];
+      const py = (p/W)|0, px = p - py*W;
+      if(px < x0) x0 = px; if(px > x1) x1 = px; if(py < y0) y0 = py; if(py > y1) y1 = py;
+      if(tinte[p]){ sx += px; sy += py; sxx += px*px; sxy += px*py; cnt++; }
+      for(let dy=-1; dy<=1; dy++){
+        const ny = py+dy; if(ny < 0 || ny >= H) continue;
+        for(let dx=-1; dx<=1; dx++){
+          const nx = px+dx; if(nx < 0 || nx >= W) continue;
+          const q = ny*W+nx;
+          if(zu[q] && marke[q] < 0){ marke[q] = nr; stapel[sp++] = q; }
+        }
+      }
+    }
+    nr++;
+    const w = x1-x0+1, h = y1-y0+1;
+    if(w < 60 || h < 6 || h > 55 || w < 3*h || cnt < 50) continue;
+    const nen = cnt*sxx - sx*sx;
+    if(Math.abs(nen) < 1e-9) continue;
+    const a = (cnt*sxy - sx*sy)/nen, bb = (sy - a*sx)/cnt;
+    const xm = (x0 + x1)/2;
+    stuecke.push({a, xm: 2*xm, ym: 2*(a*xm + bb), w: 2*w});
+  }
+  return stuecke;
+}
+
+function fluchtpunktRechnen(st){
+  if(st.length < 8) return null;
+  const wink = st.map(x => Math.atan(x.a)*180/Math.PI);
+  const sortiert = wink.slice().sort((p, q) => p - q);
+  const q = f => sortiert[Math.min(sortiert.length-1, Math.max(0, Math.round(f*(sortiert.length-1))))];
+  const sw = st.reduce((t, x) => t + x.w, 0);
+  if(q(0.9) - q(0.1) < 0.5){
+    const sm = st.reduce((t, x) => t + x.a*x.w, 0)/sw;
+    const wS = Math.atan(sm)*180/Math.PI;
+    return {parallel:true, s:sm, abw: st.reduce((t, x, i) => t + Math.abs(wink[i]-wS)*x.w, 0)/sw};
+  }
+  let m11 = 0, m12 = 0, m22 = 0, r1 = 0, r2 = 0;
+  st.forEach(function(x){
+    const w2 = x.w*x.w, r = x.a*x.xm - x.ym;
+    m11 += w2*x.a*x.a; m12 -= w2*x.a; m22 += w2; r1 += w2*x.a*r; r2 -= w2*r;
+  });
+  const det = m11*m22 - m12*m12;
+  if(Math.abs(det) < 1e-12) return null;
+  const xv = (r1*m22 - m12*r2)/det, yv = (m11*r2 - m12*r1)/det;
+  let abw = 0;
+  st.forEach(function(x, i){
+    abw += Math.abs(wink[i] - Math.atan((x.ym - yv)/(x.xm - xv))*180/Math.PI)*x.w;
+  });
+  return {parallel:false, xv, yv, abw: abw/sw};
+}
+
+function fluchtpunktRobust(st){
+  let liste = st.slice(), raus = 0;
+  for(let runde=0; runde<4; runde++){
+    const vp = fluchtpunktRechnen(liste);
+    if(!vp) return null;
+    vp.raus = raus; vp.stuecke = liste.length;
+    if(vp.parallel) return vp;
+    const abw = liste.map(x => Math.abs(Math.atan(x.a)*180/Math.PI -
+                                        Math.atan((x.ym - vp.yv)/(x.xm - vp.xv))*180/Math.PI));
+    const grenze = Math.max(1.5, 3*median(abw));
+    const gut = liste.filter((x, i) => abw[i] <= grenze);
+    if(gut.length === liste.length) return vp;
+    raus += liste.length - gut.length;
+    liste = gut;
+  }
+  const vp = fluchtpunktRechnen(liste);
+  if(vp){ vp.raus = raus; vp.stuecke = liste.length; }
+  return vp;
+}
+
+/* Jede Zeile des Ergebnisses wird entlang einer Geraden durch den
+   Fluchtpunkt abgetastet. x bleibt x; damit ist nur senkrecht zu
+   interpolieren. In der Blattmitte bleibt der Maßstab 1. */
+function entzerrenNachFluchtpunkt(canvas, vp){
+  const W = canvas.width, H = canvas.height, xc = W/2;
+  const d = canvas.getContext('2d').getImageData(0, 0, W, H).data;
+  const g = new Uint8Array(W*H);
+  for(let i=0, j=0; i<W*H; i++, j+=4) g[i] = (d[j]*299 + d[j+1]*587 + d[j+2]*114)/1000;
+  /* Das Ergebnis bleibt so hoch wie das Original. Nimmt man die Ecken des
+     Fächers mit, wird es um bis zu ein Fünftel höher - und je größer das
+     Bild, desto stärker verkleinert die Erkennung es intern. Genau das hat
+     beim ersten Münch-Foto geschadet. Was wegfällt, ist Blattrand. */
+  const lo = 0, HA = H;
+  const aus = document.createElement('canvas');
+  aus.width = W; aus.height = HA;
+  const ctx = aus.getContext('2d');
+  const img = ctx.createImageData(W, HA), o = img.data;
+  for(let v=0; v<HA; v++){
+    const beta = (lo + v - vp.yv)/(xc - vp.xv), alpha = vp.yv - beta*vp.xv;
+    for(let x=0; x<W; x++){
+      const y = alpha + beta*x;
+      let wert = 255;
+      if(y >= 0 && y < H-1){
+        const y0 = y|0, f = y - y0;
+        wert = g[y0*W+x]*(1-f) + g[(y0+1)*W+x]*f;
+      }
+      const k = (v*W + x)*4;
+      o[k] = o[k+1] = o[k+2] = wert; o[k+3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return aus;
+}
+
+let letzteEntzerrung = null;
 
 function drehenUm(canvas, grad){
   if(Math.abs(grad) < 0.12) return canvas;
@@ -1973,11 +2170,32 @@ async function lauf(){
 
   let winkel = 0;
   let arbeit = quelle;
+  letzteEntzerrung = null;
   if(document.getElementById('optEntzerren').checked){
+    const tE = jetzt();
+    let vp = null, gefunden = 0;
     try{
-      winkel = schraeglage(quelle);
-      arbeit = drehenUm(quelle, winkel);
-    }catch(e){ winkel = 0; arbeit = quelle; }
+      const st = textzeilenMessen(quelle);
+      gefunden = st.length;
+      vp = fluchtpunktRobust(st);
+    }catch(e){ vp = null; }
+    if(vp && !vp.parallel && vp.abw <= 1.0){
+      try{
+        arbeit = entzerrenNachFluchtpunkt(quelle, vp);
+        letzteEntzerrung = {art:'textzeilen', stuecke:vp.stuecke, raus:vp.raus, abw:vp.abw,
+                            xv:vp.xv, yv:vp.yv, gefunden, dauer: jetzt()-tE};
+      }catch(e){ vp = null; arbeit = quelle; }
+    }
+    if(!letzteEntzerrung){
+      try{
+        winkel = schraeglage(quelle);
+        arbeit = drehenUm(quelle, winkel);
+      }catch(e){ winkel = 0; arbeit = quelle; }
+      letzteEntzerrung = {art:'drehung', winkel, gefunden,
+        grund: !vp ? (gefunden < 8 ? 'zu wenige Textzeilen (' + gefunden + ')' : 'kein Fluchtpunkt')
+                   : (vp.parallel ? 'Textzeilen laufen parallel' : 'Abweichung ' + vp.abw.toFixed(2) + '°'),
+        dauer: jetzt()-tE};
+    }
   }
 
   let t0 = jetzt();
@@ -2416,6 +2634,15 @@ function verarbeite(erg, arbeit, winkel, leseDauer, nachleseBericht){
     });
     if(getrennt) mess.push('Nachgetrennt: ' + getrennt + ' zusammengefallene Zelle(n)');
     mess.push('Zeilen kommen von: ' + (gitter ? 'den gedruckten Linien' : (raster ? 'dem Zeilengesetz der Nummernspalte' : 'nichts – Zuordnung wie in v0.9')));
+    if(letzteEntzerrung){
+      const e = letzteEntzerrung;
+      mess.push(e.art === 'textzeilen'
+        ? 'Entzerrt aus den Textzeilen: ' + e.stuecke + ' Zeilenstücke' + (e.raus ? ' (' + e.raus + ' verworfen)' : '') +
+          ', Fluchtpunkt bei x ' + Math.round(e.xv) + ' / y ' + Math.round(e.yv) +
+          ', Abweichung ' + e.abw.toFixed(2) + '°, ' + Math.round(e.dauer) + ' ms'
+        : 'Gedreht um ' + e.winkel.toFixed(2) + '° – nicht aus den Textzeilen entzerrt: ' + e.grund +
+          ', ' + Math.round(e.dauer) + ' ms');
+    }
 
     const rv = rollenVerteilen(teile);
     /* Ohne Linienraster kann die Zuordnung um ganze Zeilen verschoben sein -
@@ -2554,7 +2781,9 @@ function verarbeite(erg, arbeit, winkel, leseDauer, nachleseBericht){
   const kz = 'Kennzahlen: ' + (leseDauer/1000).toFixed(1) + ' s · ' +
              gueltig.length + ' von ' + alle.length + ' Wörtern behalten · ' +
              (gueltig.length ? Math.round(summe/gueltig.length) : 0) + ' % mittlere Sicherheit · ' +
-             (winkel ? winkel.toFixed(2) : '0') + '° Schräglage\n' +
+             (letzteEntzerrung && letzteEntzerrung.art === 'textzeilen'
+                ? 'aus ' + letzteEntzerrung.stuecke + ' Textzeilen entzerrt\n'
+                : (winkel ? winkel.toFixed(2) : '0') + '° Schräglage\n') +
              'Einstellungen: Modell ' + (MODELLE[aktivesModell] ? MODELLE[aktivesModell].name : aktivesModell) +
              ', Schwelle ' + document.getElementById('schwelle').value +
              (document.getElementById('optEntzerren').checked ? ', entzerrt' : ', nicht entzerrt') +
@@ -2661,6 +2890,11 @@ function ernteBauen(teile, raster, zuB, zuO, meta){
     quelle: {
       breite: meta.breite, hoehe: meta.hoehe,
       schraeglage: meta.winkel ? Math.round(meta.winkel*100)/100 : 0,
+      entzerrung: letzteEntzerrung ? (letzteEntzerrung.art === 'textzeilen'
+        ? {art:'textzeilen', stuecke:letzteEntzerrung.stuecke, verworfen:letzteEntzerrung.raus,
+           fluchtpunkt:[Math.round(letzteEntzerrung.xv), Math.round(letzteEntzerrung.yv)],
+           abweichung: Math.round(letzteEntzerrung.abw*100)/100}
+        : {art:'drehung', grund:letzteEntzerrung.grund}) : null,
       modell: meta.modell || '', schwelle: meta.schwelle,
       datei: meta.datei || ''
     },
