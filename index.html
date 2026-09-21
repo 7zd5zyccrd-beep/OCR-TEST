@@ -1,7 +1,38 @@
 <!DOCTYPE html>
 <!--
   PaddleOCR-Test · Verteilerbeschreibung
-  v0.17 · 21.09.2026
+  v0.18 · 21.09.2026
+
+  v0.18: die Nachlese. Auf dem Schmidtgen-Blatt lagen in v0.17 alle 14
+  Eintraege in der richtigen Zeile, drei davon aber mit verlesenem Text
+  ("wonnzlmnere", "wtschmasc BEIcucntung Badk", "scschiespiche"). Unten hatte
+  die Erkennung je einen Kasten ueber zwei Textzeilen gelegt: das Blatt wurde
+  um 1,75 Grad gedreht, die Textzeilen dort liegen durch die Perspektive aber
+  um 3 bis 4 Grad schief.
+
+  Zweifelhaft ist eine Zelle mit weniger als 85 % Sicherheit oder ohne
+  Treffer auf den Listen. Fuer jede wird ein Band von 1,6 Zeilenhoehen
+  ausgeschnitten, die Neigung der Textzeile darin ueber das Schwaerzungs-
+  profil gesucht, das Band geradegezogen, die Zeile auf die Mitte gezogen und
+  auf doppelte Groesse gebracht. Dann liest die Erkennung ein zweites Mal;
+  genommen wird, was in der Streifenmitte steht. Uebernommen wird nur, was
+  mindestens so sicher gelesen ist wie vorher - eine zweite Lesung darf eine
+  gute erste nie verschlechtern.
+
+  Eingesetzt wird ein einziger neuer Wortkasten mit der Umhuellenden der
+  alten; die Lage bleibt damit exakt dieselbe, nur der Text wechselt. Danach
+  laeuft die Verarbeitung ein zweites Mal. Die Zelle traegt den Vermerk
+  "zweite Lesung, vorher ...", die Ernte das Feld "vorher", und im
+  Bild-Reiter stehen die Streifen samt Ergebnis.
+
+  Im Chat an Jeans Foto vorgerechnet: die drei Streifen zeigen je genau eine
+  gerade, gut lesbare Zeile, die Neigung dort 3,0 / 3,7 / 3,9 Grad. Im
+  Trockenlauf mit den Zellen aus seinem Telefonlauf werden vier Zellen
+  ausgewaehlt und die Tabelle danach vollstaendig richtig - vorausgesetzt,
+  die zweite Lesung liest die Streifen richtig. Das zeigt nur das Telefon.
+
+  Neuer Schalter "Zweifelhafte Zellen einzeln nachlesen", neuer Schritt in
+  der Schrittliste.
 
   v0.17: Listen statt Tabellen (Etappe A fuer das Schreibmaschinenblatt von
   Schmidtgen & Mieth - keine Tabellenlinien, nur Nummer und Text).
@@ -445,7 +476,7 @@
 
   <header>
     <h1>PaddleOCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.17 · 21.09.2026</span>
+    <span class="ver">v0.18 · 21.09.2026</span>
   </header>
 
   <div class="karte">
@@ -492,6 +523,7 @@
       <div class="schalter"><input type="checkbox" id="optSpalten" checked><label for="optSpalten">Spalten trennen</label></div>
       <div class="schalter"><input type="checkbox" id="optNach" checked><label for="optNach">Nummern und Wörter nachbearbeiten</label></div>
       <div class="schalter"><input type="checkbox" id="optLinien" checked><label for="optLinien">Gedruckte Tabellenlinien suchen</label></div>
+      <div class="schalter"><input type="checkbox" id="optNachlese" checked><label for="optNachlese">Zweifelhafte Zellen einzeln nachlesen</label></div>
     </div>
     <p class="hinweis" id="fotoinfo">Am besten dasselbe Blatt wie bisher, damit wir vergleichen können.</p>
   </div>
@@ -572,12 +604,13 @@ const MODELLE = {
   latin: {name:'v5 lateinisch',  konstante:'V5_LATIN_MOBILE_MODEL'}
 };
 
-const VERSION = 'v0.17 · 21.09.2026';
+const VERSION = 'v0.18 · 21.09.2026';
 
 /* ==================== Schrittliste ==================== */
 
 const SCHRITTE = [['modul','Bibliothek laden'],['start','Dienst starten, Modelle holen'],
-                  ['foto','Foto einlesen'],['lesen','Text erkennen'],['nach','Nachbearbeiten']];
+                  ['foto','Foto einlesen'],['lesen','Text erkennen'],['nach','Nachbearbeiten'],
+                  ['nachlese','Zweifelhafte Zellen nachlesen']];
 const liste = document.getElementById('schritte');
 const zeilenEl = {};
 SCHRITTE.forEach(([id, text]) => {
@@ -1919,13 +1952,199 @@ async function lauf(){
 
   t0 = jetzt();
   setze('nach','laeuft');
+  let info = null;
   try{
-    verarbeite(erg, arbeit, winkel, leseDauer);
+    info = verarbeite(erg, arbeit, winkel, leseDauer, null);
     setze('nach','gut','', jetzt()-t0);
   }catch(err){
     setze('nach','schlecht', err.message, jetzt()-t0);
   }
+
+  /* Nachlese: Zellen, die die Deutung nicht einordnen kann oder die mit
+     wenig Sicherheit gelesen wurden, werden einzeln ausgeschnitten,
+     geradegezogen, vergrößert und ein zweites Mal gelesen. */
+  const zweifel = info && info.zweifel ? info.zweifel : [];
+  if(document.getElementById('optNachlese').checked && zweifel.length){
+    t0 = jetzt();
+    setze('nachlese','laeuft', zweifel.length + ' Zelle(n)');
+    try{
+      const bericht = await nachlesen(arbeit, zweifel, info.hoehe || 40);
+      const uebernommen = bericht.filter(b => b.uebernommen);
+      if(uebernommen.length){
+        ersetzeInErgebnis(erg, uebernommen);
+        verarbeite(erg, arbeit, winkel, leseDauer, bericht);
+      } else if(info){
+        verarbeite(erg, arbeit, winkel, leseDauer, bericht);
+      }
+      zeigeStreifen(bericht);
+      setze('nachlese','gut', uebernommen.length + ' von ' + zweifel.length + ' übernommen', jetzt()-t0);
+    }catch(err){
+      setze('nachlese','schlecht', err.message, jetzt()-t0);
+    }
+  } else {
+    zeigeStreifen(null);
+    setze('nachlese','gut', zweifel.length ? 'abgeschaltet' : 'nichts zu tun');
+  }
   document.getElementById('nochmal').disabled = false;
+}
+
+/* ==================== Nachlese ====================
+
+   Auf dem Schreibmaschinenblatt von Schmidtgen & Mieth hat die Erkennung
+   unten je einen Kasten über zwei Textzeilen gelegt und darin Buchstaben aus
+   beiden gelesen ("wtschmasc BEIcucntung Badk"). Das Blatt wurde um 1,75 Grad
+   gedreht, die Textzeilen dort unten liegen aber um 3 bis 4 Grad schief -
+   die Perspektive. Das Zeilengesetz hat die Wörter trotzdem richtig
+   einsortiert, nur der Text darin ist Unsinn.
+
+   Für solche Zellen weiß die App, wo sie liegen. Sie schneidet ein Band von
+   gut anderthalb Zeilenhöhen aus, sucht darin die Neigung der Textzeile über
+   das Schwärzungsprofil, zieht das Band gerade, zieht die Zeile auf die Mitte,
+   verdoppelt die Größe und lässt die Erkennung ein zweites Mal darüber laufen.
+   Genommen wird, was in der Mitte des Streifens steht; die angeschnittenen
+   Nachbarzeilen am Rand fallen weg.
+
+   Im Chat an Jeans Foto vorgerechnet: die drei Streifen zeigen jeweils genau
+   eine gerade, gut lesbare Zeile. Ob die Erkennung sie richtig liest, zeigt
+   erst das Telefon. */
+function nachleseStreifen(arbeit, xa, xb, yc, h){
+  const pad = 0.6*h, hoch = 1.6*h, faktor = 2;
+  const x0 = Math.max(0, Math.floor(xa - pad));
+  const x1 = Math.min(arbeit.width, Math.ceil(xb + pad));
+  const xc = (x0 + x1)/2;
+  const rand = Math.ceil(0.11*(x1 - x0) + hoch);
+  const by0 = Math.max(0, Math.floor(yc - rand));
+  const by1 = Math.min(arbeit.height, Math.ceil(yc + rand));
+  const bw = x1 - x0, bh = by1 - by0;
+  if(bw < 4 || bh < 4) return null;
+  const d = arbeit.getContext('2d').getImageData(x0, by0, bw, bh).data;
+  const grau = function(x, y){
+    const xi = Math.round(x) - x0, yi = Math.round(y) - by0;
+    if(xi < 0 || xi >= bw || yi < 0 || yi >= bh) return 255;
+    const i = (yi*bw + xi)*4;
+    return (d[i]*299 + d[i+1]*587 + d[i+2]*114)/1000;
+  };
+  /* Neigung: bei der richtigen ist das Schwärzungsprofil am schärfsten */
+  let best = null;
+  for(let s = -0.10; s <= 0.1001; s += 0.004){
+    const prof = [];
+    for(let r = -hoch/2; r < hoch/2; r += 1){
+      let t = 0, n = 0;
+      for(let x = x0; x < x1; x += 4){ t += 255 - grau(x, yc + r + s*(x - xc)); n++; }
+      prof.push(t/n);
+    }
+    let m = 0; prof.forEach(p => m += p); m /= prof.length;
+    let v = 0; prof.forEach(p => v += (p - m)*(p - m));
+    if(!best || v > best.v) best = {v, s, prof};
+  }
+  /* Die Zeile auf die Mitte ziehen: dunkelste Stelle nahe der Mitte, leicht
+     geglättet, damit ein einzelner Strich sie nicht an sich reißt */
+  const glatt = Math.max(1, Math.round(0.2*h));
+  let bestR = 0, bestW = -1;
+  for(let k = 0; k < best.prof.length; k++){
+    const r = -hoch/2 + k;
+    if(Math.abs(r) > 0.5*h) continue;
+    let t = 0, n = 0;
+    for(let q = k - glatt; q <= k + glatt; q++){
+      if(q >= 0 && q < best.prof.length){ t += best.prof[q]; n++; }
+    }
+    if(t/n > bestW){ bestW = t/n; bestR = r; }
+  }
+  const ym = yc + bestR;
+  const c = document.createElement('canvas');
+  c.width = Math.max(8, Math.round(bw*faktor));
+  c.height = Math.max(8, Math.round(hoch*faktor));
+  const cx = c.getContext('2d');
+  cx.fillStyle = '#fff'; cx.fillRect(0, 0, c.width, c.height);
+  const ytop = ym - hoch/2;
+  cx.setTransform(faktor, -best.s*faktor, 0, faktor, -faktor*x0, -faktor*(ytop - best.s*xc));
+  cx.drawImage(arbeit, 0, 0);
+  cx.setTransform(1, 0, 0, 1, 0, 0);
+  return {canvas:c, s:best.s, faktor, hoch};
+}
+
+async function nachlesen(arbeit, zweifel, h){
+  const bericht = [];
+  for(let n = 0; n < zweifel.length; n++){
+    const z = zweifel[n];
+    const st = nachleseStreifen(arbeit, z.x0, z.x1, z.y, h);
+    const eintrag = Object.assign({}, z, {neu:'', confNeu:0, uebernommen:false,
+                                          neigung: st ? st.s : null, streifen: st ? st.canvas : null});
+    bericht.push(eintrag);
+    if(!st) continue;
+    let erg2;
+    try{ erg2 = await dienst.recognize(st.canvas, {noCache:true}); }catch(e){ continue; }
+    const w = holeWoerter(erg2);
+    const mitte = st.canvas.height/2, tol = 0.35*h*st.faktor;
+    const nah = w.filter(x => x.text && Math.abs((x.bbox.y0 + x.bbox.y1)/2 - mitte) < tol)
+                 .sort((a, b) => a.bbox.x0 - b.bbox.x0);
+    if(!nah.length) continue;
+    eintrag.neu = nah.map(x => x.text).join(' ').replace(/\s+/g, ' ').trim();
+    eintrag.confNeu = nah.reduce((s, x) => s + x.confidence, 0)/nah.length;
+    /* Übernommen wird nur, was mindestens so sicher gelesen ist wie vorher -
+       eine zweite Lesung darf eine gute erste nie verschlechtern. */
+    eintrag.uebernommen = eintrag.neu.length >= 2 && eintrag.confNeu >= z.conf &&
+                          eintrag.neu !== saeubern(z.text);
+  }
+  return bericht;
+}
+
+/* Die Streifen im Bild-Reiter zeigen - damit auf dem Telefon zu sehen ist,
+   was die zweite Lesung wirklich vor sich hatte. */
+function zeigeStreifen(bericht){
+  const alt = document.getElementById('nachleseBox');
+  if(alt && alt.parentNode) alt.parentNode.removeChild(alt);
+  if(!bericht || !bericht.length) return;
+  const box = document.createElement('div');
+  box.id = 'nachleseBox';
+  const h = document.createElement('h3');
+  h.className = 'klein';
+  h.textContent = 'Nachlese – was die zweite Lesung gesehen hat';
+  box.appendChild(h);
+  bericht.forEach(function(b){
+    if(!b.streifen) return;
+    const img = document.createElement('img');
+    img.src = b.streifen.toDataURL('image/jpeg', 0.8);
+    img.style.cssText = 'width:100%;display:block;margin-top:12px;border:1px solid #E2E4DC;border-radius:6px';
+    const p = document.createElement('p');
+    p.className = 'hinweis';
+    p.textContent = '„' + saeubern(b.text) + '" → „' + (b.neu || '–') + '" (' +
+                    Math.round(b.conf) + ' → ' + Math.round(b.confNeu) + ' %)' +
+                    (b.uebernommen ? ', übernommen' : ', verworfen');
+    box.appendChild(img); box.appendChild(p);
+  });
+  document.getElementById('tBild').appendChild(box);
+}
+
+/* Die nachgelesenen Wörter ins Erkennungsergebnis einsetzen: die alten
+   Wortkästen dieser Zelle heraus, ein einziger neuer Kasten mit der
+   Umhüllenden hinein. Die Lage bleibt damit exakt dieselbe, nur der Text
+   wechselt - das Einsortieren muss nichts neu entscheiden. */
+function ersetzeInErgebnis(erg, uebernommen){
+  const gleich = (b, k) => Math.abs(b.x0 - k.x0) < 0.01 && Math.abs(b.y0 - k.y0) < 0.01 &&
+                           Math.abs(b.x1 - k.x1) < 0.01 && Math.abs(b.y1 - k.y1) < 0.01;
+  const wegKaesten = [];
+  uebernommen.forEach(u => u.kaesten.forEach(k => wegKaesten.push(k)));
+  erg.lines = (erg.lines || []).map(function(zeile){
+    const liste = Array.isArray(zeile) ? zeile : (zeile && zeile.words) ? zeile.words : [zeile];
+    const rest = liste.filter(function(w){
+      if(!w) return false;
+      const b = w.box || w.bbox || w.rect;
+      if(!b) return true;
+      const x0 = (b.x !== undefined) ? b.x : b.x0, y0 = (b.y !== undefined) ? b.y : b.y0;
+      const br = (b.width !== undefined) ? b.width : (b.x1 - b.x0);
+      const ho = (b.height !== undefined) ? b.height : (b.y1 - b.y0);
+      const k = {x0, y0, x1:x0+br, y1:y0+ho};
+      return !wegKaesten.some(q => gleich(k, q));
+    });
+    return rest;
+  }).filter(z => z.length);
+  uebernommen.forEach(function(u){
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    u.kaesten.forEach(k => { x0 = Math.min(x0,k.x0); y0 = Math.min(y0,k.y0); x1 = Math.max(x1,k.x1); y1 = Math.max(y1,k.y1); });
+    erg.lines.push([{text:u.neu, box:{x:x0, y:y0, width:x1-x0, height:y1-y0},
+                     confidence:u.confNeu/100, vorher:u.text, confVorher:u.conf}]);
+  });
 }
 
 /* Paddle liefert lines: Liste von Zeilen, je Zeile eine Liste von Wörtern
@@ -1949,14 +2168,16 @@ function holeWoerter(erg){
         bbox: {x0, y0, x1: x0+br, y1: y0+ho},
         confidence: (w.confidence !== undefined ? w.confidence : 1) * 100,
         zeile: zi,
-        behalten: true
+        behalten: true,
+        vorher: w.vorher, confVorher: w.confVorher
       });
     });
   });
   return raus;
 }
 
-function verarbeite(erg, arbeit, winkel, leseDauer){
+function verarbeite(erg, arbeit, winkel, leseDauer, nachleseBericht){
+  let rueck = {zweifel:[], hoehe:40};
   const alle = holeWoerter(erg);
   const schwelle = parseFloat(document.getElementById('schwelle').value) * 100;
   const kopfWeg = document.getElementById('optKopf').checked;
@@ -2096,6 +2317,18 @@ function verarbeite(erg, arbeit, winkel, leseDauer){
     const gebaut = baueTabelle(teile, nach, raster, rv.rollen, gitter, basis, warnung);
     ziel.appendChild(gebaut.knoten);
     tabellenText = gebaut.text;
+    rueck = {zweifel: gebaut.zweifel || [],
+             hoehe: (gitter && gitter.hoehe) || (raster && raster.hoehe) || nrZ.hoehe || 40};
+
+    if(nachleseBericht && nachleseBericht.length){
+      const ueb = nachleseBericht.filter(b => b.uebernommen).length;
+      mess.push('Nachlese: ' + nachleseBericht.length + ' Zelle(n) zweifelhaft, ' + ueb + ' übernommen');
+      nachleseBericht.forEach(function(b){
+        mess.push('   „' + saeubern(b.text) + '" (' + Math.round(b.conf) + ' %) -> „' + (b.neu || '–') + '" (' +
+                  Math.round(b.confNeu) + ' %)' + (b.uebernommen ? '' : ' – verworfen') +
+                  (b.neigung !== null && b.neigung !== undefined ? ', Neigung ' + (Math.atan(b.neigung)*180/Math.PI).toFixed(1) + '°' : ''));
+      });
+    }
 
     const ernte = ernteBauen(teile, raster, gebaut.zuB, gebaut.zuO, {
       breite: arbeit.width, hoehe: arbeit.height, winkel,
@@ -2236,6 +2469,7 @@ function verarbeite(erg, arbeit, winkel, leseDauer){
                   '\n\n--- Messwerte, Raster und Ernte ---\n' + messText + '\n\n' + kz;
 
   document.getElementById('ergebnis').style.display = 'block';
+  return rueck;
 }
 
 /* ==================== Die Ernte ====================
@@ -2293,7 +2527,9 @@ function ernteBauen(teile, raster, zuB, zuO, meta){
         const j2 = z ? z.zu.indexOf(j) : -1;
         zeileNr = j2 >= 0 ? j2 + 1 : null;
       }
+      const vorher = (zl.woerter || []).filter(w => w.vorher !== undefined).map(w => w.vorher).join(' ');
       zellen.push({
+        vorher: vorher || undefined,
         zeile: zeileNr, spalte: si, roh: zl.text,
         sicherheit: Math.round(zl.conf || 0),
         y: Math.round(zl.mitte),
@@ -2707,7 +2943,7 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
   const benutzt = {1:{}, 2:{}};
 
   const leerD = function(){ return {text:'', herkunft:'leer', unklar:false, leer:true, roh:''}; };
-  const reihen = [];
+  const reihen = [], zweifel = [];
   let erwartet = 1;
 
   /* Zeilenweise statt nummernweise. Das Linienraster kennt auch die Zeilen, in
@@ -2780,11 +3016,12 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
     }
     if(n.b !== null && n.b !== undefined) erwartet = n.b + 1;
 
-    const roh = {}, restwert = {};
+    const roh = {}, restwert = {}, quelle = {};
     [1,2].forEach(function(i){
       const j = gitter ? spalteNachZeile[i][r] : zuord[i].zu[zi];
       if(j === undefined || j < 0) return;
       benutzt[i][j] = true;
+      quelle[rollen[i] || 'bezeichnung'] = {i, j};
       /* hieß bis v0.14 ebenfalls r und kollidierte mit der Zeilennummer eine
          Zeile darüber - dieselbe Klammer, dieselbe Bezeichnung */
       const rolle = rollen[i] || 'bezeichnung';
@@ -2830,6 +3067,29 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
                   restwert[r].toFixed(2) + ')';
     });
 
+    /* v0.18: zweifelhafte Zellen für die Nachlese vormerken - wenig
+       Sicherheit oder kein Treffer auf den Listen. Was schon einmal
+       nachgelesen wurde, trägt den Vermerk "vorher" und wird gezeigt statt
+       ein drittes Mal gelesen. */
+    Object.keys(quelle).forEach(function(rolle){
+      const q = quelle[rolle];
+      const zl = teile[q.i].zeilen[q.j];
+      if(!zl || !zl.woerter || !zl.woerter.length) return;
+      const feld = rolle === 'absicherung' ? sich : (rolle === 'ort' ? ort : bez);
+      const nachgelesen = zl.woerter.filter(w => w.vorher !== undefined);
+      if(nachgelesen.length){
+        feld.nachgelesen = nachgelesen.map(w => w.vorher).join(' ');
+        return;
+      }
+      const conf = zl.conf || 0;
+      if(!(conf < 85 || feld.unklar || feld.herkunft === 'frei' || feld.herkunft === 'unklar')) return;
+      let x0 = Infinity, x1 = -Infinity;
+      zl.woerter.forEach(w => { if(w.bbox){ x0 = Math.min(x0, w.bbox.x0); x1 = Math.max(x1, w.bbox.x1); } });
+      if(!isFinite(x0)) return;
+      zweifel.push({spalte:q.i, text:zl.text, conf, x0, x1, y:zl.mitte,
+        kaesten: zl.woerter.filter(w => w.bbox).map(w => ({x0:w.bbox.x0, y0:w.bbox.y0, x1:w.bbox.x1, y1:w.bbox.y1}))});
+    });
+
     reihen.push({n, bez, ort, sich, hinweis, luecke:n.luecke, erw:erwartet,
                  abgeleitet:!!n.abgeleitet,
                  fortgesetzt: !gitter && ((fortsetzung[1][zi]||[]).length + (fortsetzung[2][zi]||[]).length) > 0});
@@ -2869,17 +3129,25 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
     const tr = document.createElement('tr');
     tr.appendChild(zelle(r.n.text, r.n.roh, r.n.herkunft || 'gelesen', r.n.unklar, false, 'nr',
                          r.abgeleitet ? 'Nummer aus dem Raster' : ''));
-    tr.appendChild(zelle(r.bez.text, r.bez.roh, r.bez.herkunft, r.bez.unklar, r.bez.leer, '', r.hinweis));
+    const zweite = f => f.nachgelesen ? 'zweite Lesung, vorher „' + f.nachgelesen + '"' : '';
+    const mit = function(a, b){ return [a, b].filter(Boolean).join(' · '); };
+    tr.appendChild(zelle(r.bez.text, r.bez.nachgelesen ? '' : r.bez.roh, r.bez.herkunft, r.bez.unklar, r.bez.leer, '',
+                         mit(r.hinweis, zweite(r.bez))));
     if(zeigeOrt)
-      tr.appendChild(zelle(r.ort.text, r.ort.geholt ? '' : r.ort.roh, r.ort.herkunft, r.ort.unklar, r.ort.leer, '', ''));
+      tr.appendChild(zelle(r.ort.text, (r.ort.geholt || r.ort.nachgelesen) ? '' : r.ort.roh, r.ort.herkunft, r.ort.unklar, r.ort.leer, '',
+                           zweite(r.ort)));
     if(zeigeSich)
-      tr.appendChild(zelle(r.sich.text, r.sich.roh, r.sich.herkunft, r.sich.unklar, r.sich.leer, '', r.sich.hinweis));
+      tr.appendChild(zelle(r.sich.text, r.sich.nachgelesen ? '' : r.sich.roh, r.sich.herkunft, r.sich.unklar, r.sich.leer, '',
+                           mit(r.sich.hinweis, zweite(r.sich))));
     koerper.appendChild(tr);
 
     const felder = [r.n.text + (r.abgeleitet ? '*' : ''), r.bez.leer ? '—' : r.bez.text];
     if(zeigeOrt)  felder.push(r.ort.leer ? '—' : r.ort.text);
     if(zeigeSich) felder.push(r.sich.leer ? '—' : r.sich.text + (r.sich.hinweis ? ' (' + r.sich.hinweis + ')' : ''));
     if(r.hinweis) felder.push('(' + r.hinweis + ')');
+    [r.bez, r.ort, r.sich].forEach(function(f){
+      if(f && f.nachgelesen) felder.push('(zweite Lesung, vorher „' + f.nachgelesen + '")');
+    });
     text += felder.join(' | ') + '\n';
   });
 
@@ -2927,7 +3195,7 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
     huelle.appendChild(h); huelle.appendChild(ul);
     text += 'Keiner Nummer zugeordnet: ' + rest.join('; ') + '\n';
   }
-  return {knoten: huelle, text, zuB, zuO};
+  return {knoten: huelle, text, zuB, zuO, zweifel};
 }
 
 /* Farbe nach Herkunft: gruen korrigiert, bernstein uebernommen ohne
