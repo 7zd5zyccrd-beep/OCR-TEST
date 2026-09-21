@@ -1,7 +1,35 @@
 <!DOCTYPE html>
 <!--
   PaddleOCR-Test · Verteilerbeschreibung
-  v0.16 · 21.09.2026
+  v0.17 · 21.09.2026
+
+  v0.17: Listen statt Tabellen (Etappe A fuer das Schreibmaschinenblatt von
+  Schmidtgen & Mieth - keine Tabellenlinien, nur Nummer und Text).
+
+  1. Die Spaltensuche verlangte genau ZWEI Trennungen. Eine Liste hat nur
+     eine, das Blatt lief deshalb als "ohne Spalten" ganz ohne Ernte durch.
+     Eine einzelne Trennung gilt jetzt, wenn die Luecken der meisten Zeilen
+     eng um dieselbe Stelle liegen; die dritte Spalte bleibt dann leer.
+  2. Fortsetzungszeilen: eine Textzeile ohne Nummer direkt unter einem
+     Eintrag gehoert zu diesem ("Flur, Kammer" zu 11-12). Vorher bekam sie
+     eine eigene Zeile und die Tabelle verrutschte ab dort um eins. Gilt nur
+     ohne Linienraster - mit Linien ist eine Zeile ohne Nummer eine echte
+     Tabellenzeile, deren Nummer nicht gelesen wurde (Blatt 2, 45 bis 48).
+  3. Nummern: erst die saubere Lesung im ganzen Fenster, dann Verwechslungen.
+     Aus "3-4" am Blattanfang wurde sonst "2-4", weil die 2 naeher an der
+     erwarteten 1 liegt. Ein sauber gelesener, aufsteigender Sprung ueber das
+     Fenster hinaus (15-16 auf 25-26) ist kein Lesefehler mehr, und der
+     Hinweis lautet neutral "fehlen - nicht vergeben oder nicht gelesen".
+  4. Deutung: auch das Komma trennt; Orte werden mit Komma verbunden wie im
+     E-Assistenten. Ortswoerter werden ueberall hinter dem ersten Wort
+     herausgezogen ("Steckdose Kueche links" -> Steckdose links, Kueche), und
+     einzelne Woerter laufen ueber die Abkuerzungstabelle (Elektroherd ->
+     E-Herd, Arbeitsplatte -> Arbeitsflaeche). "Relais" steht auf der Liste.
+
+  Am nachgebauten Blatt: alle 14 Nummern und 13 von 14 Texten richtig, nur
+  das verlesene "wonnzlmnere" bleibt als Text stehen. Die unteren vier
+  Zeilen wird das Telefon trotzdem nicht lesen - dort legt die Erkennung
+  einen Kasten ueber zwei Zeilen, das ist Etappe C (entzerren vor dem Lesen).
 
   v0.16: zwei Linienspuren, und die Nummernspalte entscheidet.
 
@@ -417,7 +445,7 @@
 
   <header>
     <h1>PaddleOCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.16 · 21.09.2026</span>
+    <span class="ver">v0.17 · 21.09.2026</span>
   </header>
 
   <div class="karte">
@@ -531,7 +559,8 @@ const BEZEICHNUNGEN = ['Licht','Steckdose','Steckdosen','Beleuchtung','E-Herd','
   'Fehlerstromschutzschalter','FI-Schutzschalter','FI/LS','Überspannungsschutz',
   'Überspannungsableiter','Hauptschalter',
   'Stromstoßschalter','Trafo','CEE-Steckdose','Klingel','Durchlauferhitzer','Warmwasser',
-  'Boiler','Heizung','Rollladen','Arbeitsfläche','Außensteckdose','Reserve','Zuleitung','Garage'];
+  'Boiler','Heizung','Rollladen','Arbeitsfläche','Außensteckdose','Reserve','Zuleitung','Garage',
+  'Relais'];
 
 const ORTE = ['Bad','Badezimmer','Küche','Flur','Diele','Wohnzimmer','Schlafzimmer','Kinderzimmer',
   'Esszimmer','Büro','Balkon','Terrasse','Keller','Kammer','Speisekammer','Abstellraum',
@@ -543,7 +572,7 @@ const MODELLE = {
   latin: {name:'v5 lateinisch',  konstante:'V5_LATIN_MOBILE_MODEL'}
 };
 
-const VERSION = 'v0.16 · 21.09.2026';
+const VERSION = 'v0.17 · 21.09.2026';
 
 /* ==================== Schrittliste ==================== */
 
@@ -811,11 +840,20 @@ function spaltenFinden(woerter, breite){
     const wert = streuung(mitten.slice(0,i)) + streuung(mitten.slice(i));
     if(wert < bestWert){ bestWert = wert; bestI = i; }
   }
-  if(bestI < 1) return null;
-  const g0 = median(mitten.slice(0,bestI));
-  const g1 = median(mitten.slice(bestI));
-  if(g1 - g0 < breite*0.08) return null;
-  return {g0, g1, hoehe};
+  if(bestI >= 1){
+    const g0 = median(mitten.slice(0,bestI));
+    const g1 = median(mitten.slice(bestI));
+    if(g1 - g0 >= breite*0.08) return {g0, g1, hoehe, zweispaltig:false};
+  }
+  /* v0.17: Liste mit nur ZWEI Spalten - Nummer und Text, wie auf dem
+     Schreibmaschinenblatt von Schmidtgen & Mieth. Bisher wurde hier nur nach
+     zwei Trennungen gesucht, eine einzige galt als gescheitert, und das Blatt
+     lief als "ohne Spalten" ganz ohne Ernte durch. Eine Trennung gilt, wenn
+     die Lücken der meisten Zeilen eng um dieselbe Stelle liegen. */
+  const m = median(mitten);
+  const nah = mitten.filter(v => Math.abs(v - m) < breite*0.04).length;
+  if(nah >= 3 && nah / mitten.length >= 0.6) return {g0:m, g1:Infinity, hoehe, zweispaltig:true};
+  return null;
 }
 
 function zuordnen(woerter, g0, g1){
@@ -1690,6 +1728,16 @@ function versuche(t, erwartet){
 function nummerDeuten(roh, erwartet){
   const t = nurNummer(roh);
   const erg = {roh, text: t || '—', geaendert:false, unklar:false, luecke:0, a:null, b:null};
+  /* v0.17: erst die saubere Lesung im ganzen Fenster, DANN Verwechslungen.
+     Vorher lief die Suche Zahl für Zahl und probierte bei jeder gleich die
+     Verwechslungen mit - aus "3-4" am Blattanfang wurde so "2-4", weil die
+     2 näher an der erwarteten 1 liegt und 3↔2 als Verwechslung gilt. */
+  const genau = zerlege(t);
+  if(genau && genau.a >= erwartet && genau.a <= erwartet + 4 && genau.b >= genau.a){
+    erg.a = genau.a; erg.b = genau.b; erg.text = schreibe(genau);
+    erg.luecke = genau.a - erwartet;
+    return erg;
+  }
   for(let e = erwartet; e <= erwartet + 4; e++){
     const v = versuche(t, e);
     if(v){
@@ -1700,6 +1748,14 @@ function nummerDeuten(roh, erwartet){
   }
   const z = zerlege(t);
   if(z){ erg.a = z.a; erg.b = Math.max(z.a, z.b); erg.text = schreibe(z); }
+  /* v0.17: eine sauber gelesene, aufsteigende Nummer jenseits des Fensters
+     ist ein Sprung, kein Lesefehler - auf dem Blatt von Schmidtgen & Mieth
+     geht es von 15-16 direkt auf 25-26. Rot bleibt nur, was Ersetzungen
+     gebraucht hat oder nicht aufsteigt. */
+  if(z && z.a > erwartet && /^[\d\s\-–—\/]+$/.test((roh||'').trim())){
+    erg.luecke = z.a - erwartet;
+    return erg;
+  }
   erg.unklar = true;
   return erg;
 }
@@ -2138,7 +2194,7 @@ function verarbeite(erg, arbeit, winkel, leseDauer){
   if(grenzen){
     x.strokeStyle = '#1E6FD9';
     x.lineWidth = Math.max(2, Math.round(arbeit.width/500));
-    grenzen.forEach(px => { x.beginPath(); x.moveTo(px,0); x.lineTo(px,arbeit.height); x.stroke(); });
+    grenzen.filter(isFinite).forEach(px => { x.beginPath(); x.moveTo(px,0); x.lineTo(px,arbeit.height); x.stroke(); });
   }
   if(schnitt !== null && schnitt > 0){
     x.strokeStyle = '#D98E0B';
@@ -2159,7 +2215,10 @@ function verarbeite(erg, arbeit, winkel, leseDauer){
              ', Schwelle ' + document.getElementById('schwelle').value +
              (document.getElementById('optEntzerren').checked ? ', entzerrt' : ', nicht entzerrt') +
              (kopfWeg ? ', Kopf verworfen' : '') +
-             (grenzen ? ', Spalten bei ' + Math.round(grenzen[0]) + ' und ' + Math.round(grenzen[1]) + ' von ' + arbeit.width : ', ohne Spalten') +
+             (grenzen ? (isFinite(grenzen[1])
+                          ? ', Spalten bei ' + Math.round(grenzen[0]) + ' und ' + Math.round(grenzen[1]) + ' von ' + arbeit.width
+                          : ', zweispaltige Liste, Trennung bei ' + Math.round(grenzen[0]) + ' von ' + arbeit.width)
+                      : ', ohne Spalten') +
              (nach ? ', nachbearbeitet' : '') + '\n' +
              'Fassung: ' + VERSION;
 
@@ -2217,7 +2276,7 @@ function ernteBauen(teile, raster, zuB, zuO, meta){
       rolle: (meta.rollen && meta.rollen[si]) || null,
       anker: si === 0,
       von: si === 0 ? 0 : (meta.grenzen ? Math.round(meta.grenzen[si-1]) : null),
-      bis: si === 2 ? meta.breite : (meta.grenzen ? Math.round(meta.grenzen[si]) : null),
+      bis: si === 2 ? meta.breite : (meta.grenzen ? (isFinite(meta.grenzen[si]) ? Math.round(meta.grenzen[si]) : meta.breite) : null),
       versatz: hatRaster ? Math.round(z.p) : 0,
       drift: hatRaster ? Math.round(z.q*100)/100 : 0,
       kosten: hatRaster ? Math.round(z.kosten*1000)/1000 : null,
@@ -2421,7 +2480,8 @@ const ABKUERZUNGEN = {
   'kz':'Kinderzimmer','zi':'Kinderzimmer','fl':'Flur','bad':'Badezimmer',
   'hwr':'Hauswirtschaftsraum','bn':'Balkon','bk':'Balkon','kel':'Keller',
   'kam':'Kammer','whg':'Wohnung','fi':'FI-Schutzschalter','rcd':'FI-Schutzschalter',
-  'üs':'Überspannungsableiter','ueberspannung':'Überspannungsableiter'
+  'üs':'Überspannungsableiter','ueberspannung':'Überspannungsableiter',
+  'elektroherd':'E-Herd','arbeitsplatte':'Arbeitsfläche'
 };
 
 /* Nennströme, die der E-Assistent im Auswahlfeld anbietet. Alles andere
@@ -2521,7 +2581,10 @@ function feldDeuten(roh, liste){
   const t = saeubern(roh);
   const erg = {roh, text:'', herkunft:'leer', unklar:false, leer:false};
   if(!t){ erg.leer = true; return erg; }
-  const teile = t.split('/');
+  /* v0.17: auch das Komma trennt ("Küche, Flur, Kammer"). Orte werden mit
+     Komma verbunden, so wie der E-Assistent sie schreibt; Bezeichnungen
+     bleiben beim Schrägstrich. */
+  const teile = t.split(/[\/,;]/);
   const raus = [];
   let korrigiert = false, frei = false;
   for(let i=0;i<teile.length;i++){
@@ -2533,7 +2596,7 @@ function feldDeuten(roh, liste){
     else { erg.text = t; erg.unklar = true; erg.herkunft = 'unklar'; return erg; }
   }
   if(!raus.length){ erg.leer = true; return erg; }
-  erg.text = raus.join(' / ');
+  erg.text = raus.join(liste === ORTE ? ', ' : ' / ');
   erg.herkunft = frei ? 'frei' : (korrigiert ? 'korrigiert' : 'gelesen');
   return erg;
 }
@@ -2543,7 +2606,7 @@ function feldDeuten(roh, liste){
    Zelle - die hinteren Wörter, die vollständig auf der Ortsliste stehen,
    sind der Ort, der Rest ist die Bezeichnung. */
 function istOrtsteil(wort){
-  const teile = saeubern(wort).split('/');
+  const teile = saeubern(wort).replace(/[,;.]+$/,'').split('/');
   let treffer = 0;
   for(let i=0;i<teile.length;i++){
     const tr = saeubern(teile[i]);
@@ -2558,20 +2621,32 @@ function istOrtsteil(wort){
 function bezUndOrt(roh){
   const t = saeubern(roh);
   if(!t) return {bez:feldDeuten('', BEZEICHNUNGEN), ort:feldDeuten('', ORTE)};
-  const woerter = t.split(' ');
-  let schnitt = woerter.length;
-  while(schnitt > 0 && istOrtsteil(woerter[schnitt-1])) schnitt--;
+  const woerter = t.split(' ').filter(Boolean);
   /* Nur Ortswörter in der Zelle: dann ist sie der Ort. Dass eine ganze
      Spalte so aussieht, fängt die Rollenvergabe ab - die macht daraus
      dann ohnehin die Ortsspalte. */
-  if(schnitt === 0)
+  if(woerter.every(istOrtsteil))
     return {bez:feldDeuten('', BEZEICHNUNGEN), ort:feldDeuten(t, ORTE)};
-  if(schnitt === woerter.length)
-    return {bez:feldDeuten(t, BEZEICHNUNGEN), ort:feldDeuten('', ORTE)};
-  return {
-    bez: feldDeuten(woerter.slice(0, schnitt).join(' '), BEZEICHNUNGEN),
-    ort: feldDeuten(woerter.slice(schnitt).join(' '), ORTE)
-  };
+  /* v0.17: Ortswörter werden überall HINTER dem ersten Wort herausgezogen,
+     nicht nur am Ende. "Steckdose Küche links" wird so zu Steckdose links in
+     der Küche - im E-Assistenten ist "links" ein Zusatz der Steckdose, kein
+     Ort. Das erste Wort bleibt immer Bezeichnung. Dabei werden einzelne
+     Wörter über die Abkürzungstabelle geführt: Elektroherd wird E-Herd,
+     Arbeitsplatte wird Arbeitsfläche. */
+  const bezW = [], ortW = [];
+  let ersetzt = false;
+  woerter.forEach(function(w, i){
+    const rein = w.replace(/[,;.]+$/,'');
+    if(!rein) return;
+    if(i > 0 && istOrtsteil(rein)){ ortW.push(rein); return; }
+    const ab = ABKUERZUNGEN[rein.toLowerCase()];
+    if(ab && BEZEICHNUNGEN.indexOf(ab) >= 0 && ab.toLowerCase() !== rein.toLowerCase()){
+      bezW.push(ab); ersetzt = true;
+    } else bezW.push(rein);
+  });
+  const bez = feldDeuten(bezW.join(' '), BEZEICHNUNGEN);
+  if(ersetzt && bez.herkunft === 'gelesen') bez.herkunft = 'korrigiert';
+  return {bez, ort: feldDeuten(ortW.join(', '), ORTE)};
 }
 
 /* Welche Spalte trägt was - gefragt wird der Inhalt, nicht die Lage.
@@ -2664,6 +2739,31 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
     nr.forEach(function(z, zi){ reihenListe.push({r:zi, zi}); });
   }
 
+  /* v0.17: eine Textzeile ohne eigene Nummer, direkt unter einem Eintrag,
+     setzt diesen fort - "Flur, Kammer" gehört zu 11-12 "Steckdose/
+     Beleuchtung Küche,". Ohne diese Regel bekam sie eine eigene Zeile, und
+     die Tabelle verrutschte ab dort um eins. Gilt nur ohne Linienraster: dort
+     entscheidet die Nummernfolge, was eine Zeile ist, und eine Zeile ohne
+     Nummer ist keine eigene. Mit Linienraster ist sie eine echte Tabellenzeile,
+     deren Nummer nicht gelesen wurde (Blatt 2, Zeilen 45 bis 48). */
+  const fortsetzung = {1:{}, 2:{}};
+  if(!gitter && raster){
+    [1,2].forEach(function(i){
+      const zz = zuord[i];
+      if(!zz.zeile) return;
+      zz.zeile.forEach(function(rz, j){
+        if(rz === null || rz === undefined || !zz.frei[j]) return;
+        let best = -1, bestK = -Infinity;
+        raster.k.forEach(function(k, zi){ if(k < rz && k > bestK){ bestK = k; best = zi; } });
+        if(best >= 0 && rz - bestK <= 2 && zz.zu[best] >= 0){
+          (fortsetzung[i][best] = fortsetzung[i][best] || []).push(saeubern(teile[i].zeilen[j].text));
+          benutzt[i][j] = true;
+          zz.frei[j] = false;
+        }
+      });
+    });
+  }
+
   reihenListe.forEach(function(eintrag){
     const zi = eintrag.zi, r = eintrag.r;
     let n;
@@ -2688,7 +2788,8 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
       /* hieß bis v0.14 ebenfalls r und kollidierte mit der Zeilennummer eine
          Zeile darüber - dieselbe Klammer, dieselbe Bezeichnung */
       const rolle = rollen[i] || 'bezeichnung';
-      roh[rolle] = teile[i].zeilen[j].text;
+      roh[rolle] = teile[i].zeilen[j].text +
+                   (!gitter && fortsetzung[i][zi] ? ' ' + fortsetzung[i][zi].join(' ') : '');
       restwert[rolle] = (zuord[i].rest && zuord[i].rest[j] !== undefined) ? zuord[i].rest[j] : 0;
     });
 
@@ -2730,7 +2831,8 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
     });
 
     reihen.push({n, bez, ort, sich, hinweis, luecke:n.luecke, erw:erwartet,
-                 abgeleitet:!!n.abgeleitet});
+                 abgeleitet:!!n.abgeleitet,
+                 fortgesetzt: !gitter && ((fortsetzung[1][zi]||[]).length + (fortsetzung[2][zi]||[]).length) > 0});
   });
 
   const zeigeOrt  = reihen.some(function(r){ return !r.ort.leer; }) || rollen.indexOf('ort') > 0;
@@ -2751,9 +2853,15 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
       const wtd = document.createElement('td');
       wtd.colSpan = breite; wtd.className = 'luecke-zeile';
       const ab = reihen[idx].erw - r.luecke - (r.n.b !== null && r.n.b !== undefined ? 0 : 0);
-      wtd.textContent = r.luecke === 1
-        ? 'Hier fehlt eine Zeile – eine Nummer wurde nicht gelesen'
-        : 'Hier fehlen ' + r.luecke + ' Zeilen';
+      /* v0.17: neutral formuliert. Auf dem Dewitz-Schild hieß eine Lücke
+         "nicht gelesen", auf der Schreibmaschinenliste heißt sie "nicht
+         vergeben" - ansehen kann man das der Nummernfolge nicht. */
+      const von = (r.n.a !== null && r.n.a !== undefined) ? r.n.a - r.luecke : null;
+      const bis = (r.n.a !== null && r.n.a !== undefined) ? r.n.a - 1 : null;
+      wtd.textContent = (von === null) ? 'Nummernsprung'
+        : (von === bis ? 'Nummer ' + von : 'Nummern ' + von + '–' + bis) +
+          ' fehlen – nicht vergeben oder nicht gelesen';
+      if(von !== null && von === bis) wtd.textContent = wtd.textContent.replace(' fehlen', ' fehlt');
       warn.appendChild(wtd);
       koerper.appendChild(warn);
       text += '[' + wtd.textContent + ']\n';
