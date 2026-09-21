@@ -1,7 +1,42 @@
 <!DOCTYPE html>
 <!--
   PaddleOCR-Test · Verteilerbeschreibung
-  v0.19 · 21.09.2026
+  v0.20 · 21.09.2026
+
+  v0.20: die Nachlese auch fuer LEERE Felder. Stand der Sammlung mit v0.19:
+  Dewitz 11 von 11, Schmidtgen 14 von 14, Blatt 2 45 von 48 - dort fehlen
+  die Bezeichnungen von 46, 47, 48, fuer die die Erkennung keinen einzigen
+  Wortkasten gefunden hat. Die Nachlese sah bisher nur vorhandene Zellen.
+
+  Jetzt wird ein Feld nachgelesen, das leer ist, wo eines sein muesste: nur
+  mit Linienraster (nur dort ist eine Zeile sicher eine echte Tabellenzeile)
+  und nur, wenn eine andere Inhaltsspalte derselben Zeile etwas traegt. Die
+  Lage kommt aus den beiden Linien der Zeile, die Breite aus der Spalte. Der
+  Streifen wird dabei NICHT auf die dunkelste Stelle gezogen - in einem
+  wirklich leeren Feld waere das der Text der Nachbarzeile. Uebernommen wird
+  ab 80 % Sicherheit und nur echte Zeichen; der neue Kasten sitzt dort, wo
+  der Text im Streifen stand, auf die Zeilenmitte des Rasters gerechnet.
+  Im Bericht heisst es "leeres Feld", in der Tabelle "zweite Lesung, vorher
+  nicht gelesen".
+
+  Beim Vorrechnen an Jeans Foto zwei Befunde: die Neigungssuche endete bei
+  5,7 Grad, die unteren Linien von Blatt 2 fallen aber mit fast 10 - die
+  Streifen sassen damit eine Zeile zu hoch. Bei leeren Feldern kommt die
+  Neigung jetzt direkt aus den beiden Linien, sonst wird ueber +-14 Grad
+  gesucht (grob, dann fein). Und der Streifen bleibt in der eigenen Spalte:
+  ueber die volle Breite bis zur Absicherungsspalte lief die gerade
+  Mittellinie am gewellten Blatt vorbei. Danach stehen FI-Schutzschalter,
+  Licht/Steckdosen Bad/WC und Steckdose Waschmaschine jeweils mittig im
+  Streifen ihrer Zeile.
+
+  Und eine Sicherung: ein leeres Feld wird nur nachgelesen, wenn sein Band
+  hoechstens 35 % von der Hoehe der Nachbarzeilen abweicht. Im Nachbau des
+  Dewitz-Schildes tauchten Baender von 23 und 121 Pixel Hoehe auf, bei
+  67 Pixel Zeilenhoehe - Stellen, an denen das Raster nicht stimmt. Zweite
+  Sicherung, rein geometrisch: liegt der gefundene Text dort, wo schon eine
+  bekannte Zelle derselben Spalte steht, ist es deren Text, und das Feld
+  bleibt leer statt doppelt belegt. (Eine Pruefung auf gleichen Wortlaut
+  waere falsch - auf Blatt 2 stehen zwei FI-Schutzschalter untereinander.)
 
   v0.19: Beifang in der Nachlese. v0.18 auf dem Telefon: Schmidtgen 14 von 14,
   alle vier Nachlesen uebernommen (72-86 % -> 97-99 %). Auf dem Dewitz-Schild
@@ -485,7 +520,7 @@
 
   <header>
     <h1>PaddleOCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.19 · 21.09.2026</span>
+    <span class="ver">v0.20 · 21.09.2026</span>
   </header>
 
   <div class="karte">
@@ -613,7 +648,7 @@ const MODELLE = {
   latin: {name:'v5 lateinisch',  konstante:'V5_LATIN_MOBILE_MODEL'}
 };
 
-const VERSION = 'v0.19 · 21.09.2026';
+const VERSION = 'v0.20 · 21.09.2026';
 
 /* ==================== Schrittliste ==================== */
 
@@ -2018,8 +2053,9 @@ async function lauf(){
    Im Chat an Jeans Foto vorgerechnet: die drei Streifen zeigen jeweils genau
    eine gerade, gut lesbare Zeile. Ob die Erkennung sie richtig liest, zeigt
    erst das Telefon. */
-function nachleseStreifen(arbeit, xa, xb, yc, h){
-  const pad = 0.6*h, hoch = 1.6*h, faktor = 2;
+function nachleseStreifen(arbeit, xa, xb, yc, h, opt){
+  opt = opt || {};
+  const pad = (opt.pad !== undefined ? opt.pad : 0.6)*h, hoch = 1.6*h, faktor = 2;
   const x0 = Math.max(0, Math.floor(xa - pad));
   const x1 = Math.min(arbeit.width, Math.ceil(xb + pad));
   const xc = (x0 + x1)/2;
@@ -2035,9 +2071,13 @@ function nachleseStreifen(arbeit, xa, xb, yc, h){
     const i = (yi*bw + xi)*4;
     return (d[i]*299 + d[i+1]*587 + d[i+2]*114)/1000;
   };
-  /* Neigung: bei der richtigen ist das Schwärzungsprofil am schärfsten */
-  let best = null;
-  for(let s = -0.10; s <= 0.1001; s += 0.004){
+  /* Neigung: bei der richtigen ist das Schwärzungsprofil am schärfsten.
+     v0.20: gesucht wird über ±14 Grad, erst grob, dann fein. Vorher endete
+     die Suche bei 5,7 Grad - auf dem Dewitz-Schild meldete die Nachlese
+     dreimal genau diesen Randwert, und die unteren Linien von Blatt 2 fallen
+     mit fast 10 Grad. Ist die Neigung schon bekannt (leeres Feld zwischen
+     zwei Linien), wird gar nicht gesucht. */
+  const profilBei = function(s){
     const prof = [];
     for(let r = -hoch/2; r < hoch/2; r += 1){
       let t = 0, n = 0;
@@ -2046,13 +2086,28 @@ function nachleseStreifen(arbeit, xa, xb, yc, h){
     }
     let m = 0; prof.forEach(p => m += p); m /= prof.length;
     let v = 0; prof.forEach(p => v += (p - m)*(p - m));
-    if(!best || v > best.v) best = {v, s, prof};
+    return {v, s, prof};
+  };
+  let best = null;
+  if(opt.neigung !== undefined && isFinite(opt.neigung)){
+    best = profilBei(opt.neigung);
+  } else {
+    for(let s = -0.25; s <= 0.2501; s += 0.01){
+      const p = profilBei(s); if(!best || p.v > best.v) best = p;
+    }
+    const grob = best.s;
+    for(let s = grob - 0.01; s <= grob + 0.0101; s += 0.002){
+      const p = profilBei(s); if(p.v > best.v) best = p;
+    }
   }
   /* Die Zeile auf die Mitte ziehen: dunkelste Stelle nahe der Mitte, leicht
      geglättet, damit ein einzelner Strich sie nicht an sich reißt */
   const glatt = Math.max(1, Math.round(0.2*h));
   let bestR = 0, bestW = -1;
-  for(let k = 0; k < best.prof.length; k++){
+  /* v0.20: bei einem LEEREN Feld nicht ziehen - dort wäre die dunkelste
+     Stelle nahe der Mitte der Text der Nachbarzeile. Die Lage kommt dann
+     aus dem Linienraster und ist genau. */
+  if(opt.ziehen !== false) for(let k = 0; k < best.prof.length; k++){
     const r = -hoch/2 + k;
     if(Math.abs(r) > 0.5*h) continue;
     let t = 0, n = 0;
@@ -2078,7 +2133,8 @@ async function nachlesen(arbeit, zweifel, h){
   const bericht = [];
   for(let n = 0; n < zweifel.length; n++){
     const z = zweifel[n];
-    const st = nachleseStreifen(arbeit, z.x0, z.x1, z.y, h);
+    const st = z.leer ? nachleseStreifen(arbeit, z.x0, z.x1, z.y, z.h, {ziehen:false, pad:0, neigung:z.neigung})
+                      : nachleseStreifen(arbeit, z.x0, z.x1, z.y, h);
     const eintrag = Object.assign({}, z, {neu:'', confNeu:0, uebernommen:false,
                                           neigung: st ? st.s : null, streifen: st ? st.canvas : null});
     bericht.push(eintrag);
@@ -2086,7 +2142,7 @@ async function nachlesen(arbeit, zweifel, h){
     let erg2;
     try{ erg2 = await dienst.recognize(st.canvas, {noCache:true}); }catch(e){ continue; }
     const w = holeWoerter(erg2);
-    const mitte = st.canvas.height/2, tol = 0.35*h*st.faktor;
+    const mitte = st.canvas.height/2, tol = 0.35*(z.leer ? z.h : h)*st.faktor;
     const nah = nachbarnWeg(
                    w.filter(x => x.text && Math.abs((x.bbox.y0 + x.bbox.y1)/2 - mitte) < tol),
                    st, z.nachbarn)
@@ -2098,6 +2154,31 @@ async function nachlesen(arbeit, zweifel, h){
        eine zweite Lesung darf eine gute erste nie verschlechtern. */
     eintrag.uebernommen = eintrag.neu.length >= 2 && eintrag.confNeu >= z.conf &&
                           eintrag.neu !== saeubern(z.text);
+    if(z.leer){
+      /* Ein leeres Feld hat keine alte Lesung zum Vergleichen - also eine
+         feste Mindestsicherheit, und es müssen echte Zeichen sein, kein Strich
+         und kein Staubkorn. */
+      eintrag.uebernommen = eintrag.neu.length >= 2 && eintrag.confNeu >= 80 &&
+                            /[0-9A-Za-zÄÖÜäöüß]{2}/.test(eintrag.neu);
+      if(eintrag.uebernommen){
+        const ua = Math.min.apply(null, nah.map(x => x.bbox.x0));
+        const ub = Math.max.apply(null, nah.map(x => x.bbox.x1));
+        const xa = st.x0 + ua/st.faktor, xb = st.x0 + ub/st.faktor, xm = (xa + xb)/2;
+        const t = (xm - z.band.xa)/Math.max(1, z.band.xb - z.band.xa);
+        const ym = ((z.band.ta + z.band.ba)/2)*(1 - t) + ((z.band.tb + z.band.bb)/2)*t;
+        const hh = (z.band.ba - z.band.ta)*(1 - t) + (z.band.bb - z.band.tb)*t;
+        eintrag.kasten = {x0:xa, x1:xb, y0:ym - hh*0.3, y1:ym + hh*0.3};
+        /* Liegt der gefundene Text dort, wo schon eine bekannte Zelle derselben
+           Spalte steht, ist es deren Text - dann stimmt das Raster an dieser
+           Stelle nicht, und das Feld bleibt leer statt doppelt belegt. */
+        const doppelt = (z.spaltenKaesten || []).some(function(k){
+          const ueber = Math.min(k.x1, xb) - Math.max(k.x0, xa);
+          const breit = Math.min(k.x1 - k.x0, xb - xa);
+          return ueber > 0.3*breit && Math.abs((k.y0 + k.y1)/2 - ym) < 0.5*hh;
+        });
+        if(doppelt){ eintrag.uebernommen = false; eintrag.doppelt = true; }
+      }
+    }
   }
   return bericht;
 }
@@ -2135,8 +2216,8 @@ function zeigeStreifen(bericht){
     img.style.cssText = 'width:100%;display:block;margin-top:12px;border:1px solid #E2E4DC;border-radius:6px';
     const p = document.createElement('p');
     p.className = 'hinweis';
-    p.textContent = '„' + saeubern(b.text) + '" → „' + (b.neu || '–') + '" (' +
-                    Math.round(b.conf) + ' → ' + Math.round(b.confNeu) + ' %)' +
+    p.textContent = (b.leer ? 'leeres Feld' : '„' + saeubern(b.text) + '"') + ' → „' + (b.neu || '–') + '" (' +
+                    (b.leer ? '' : Math.round(b.conf) + ' → ') + Math.round(b.confNeu) + ' %)' +
                     (b.uebernommen ? ', übernommen' : ', verworfen');
     box.appendChild(img); box.appendChild(p);
   });
@@ -2168,6 +2249,7 @@ function ersetzeInErgebnis(erg, uebernommen){
   }).filter(z => z.length);
   uebernommen.forEach(function(u){
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    if(u.kasten){ x0 = u.kasten.x0; y0 = u.kasten.y0; x1 = u.kasten.x1; y1 = u.kasten.y1; }
     u.kaesten.forEach(k => { x0 = Math.min(x0,k.x0); y0 = Math.min(y0,k.y0); x1 = Math.max(x1,k.x1); y1 = Math.max(y1,k.y1); });
     erg.lines.push([{text:u.neu, box:{x:x0, y:y0, width:x1-x0, height:y1-y0},
                      confidence:u.confNeu/100, vorher:u.text, confVorher:u.conf}]);
@@ -2352,8 +2434,9 @@ function verarbeite(erg, arbeit, winkel, leseDauer, nachleseBericht){
       mess.push('Nachlese: ' + nachleseBericht.length + ' Zelle(n) zweifelhaft, ' + ueb + ' übernommen' +
                 (nachleseBericht.dauer ? ', ' + (nachleseBericht.dauer/1000).toFixed(1) + ' s' : ''));
       nachleseBericht.forEach(function(b){
-        mess.push('   „' + saeubern(b.text) + '" (' + Math.round(b.conf) + ' %) -> „' + (b.neu || '–') + '" (' +
-                  Math.round(b.confNeu) + ' %)' + (b.uebernommen ? '' : ' – verworfen') +
+        mess.push('   ' + (b.leer ? 'leeres Feld' : '„' + saeubern(b.text) + '" (' + Math.round(b.conf) + ' %)') +
+                  ' -> „' + (b.neu || '–') + '" (' +
+                  Math.round(b.confNeu) + ' %)' + (b.uebernommen ? '' : (b.doppelt ? ' – verworfen, liegt auf einer bekannten Zelle' : ' – verworfen')) +
                   (b.neigung !== null && b.neigung !== undefined ? ', Neigung ' + (Math.atan(b.neigung)*180/Math.PI).toFixed(1) + '°' : ''));
       });
     }
@@ -2555,9 +2638,9 @@ function ernteBauen(teile, raster, zuB, zuO, meta){
         const j2 = z ? z.zu.indexOf(j) : -1;
         zeileNr = j2 >= 0 ? j2 + 1 : null;
       }
-      const vorher = (zl.woerter || []).filter(w => w.vorher !== undefined).map(w => w.vorher).join(' ');
+      const mitVorher = (zl.woerter || []).filter(w => w.vorher !== undefined);
       zellen.push({
-        vorher: vorher || undefined,
+        vorher: mitVorher.length ? mitVorher.map(w => w.vorher).join(' ') : undefined,
         zeile: zeileNr, spalte: si, roh: zl.text,
         sicherheit: Math.round(zl.conf || 0),
         y: Math.round(zl.mitte),
@@ -2972,6 +3055,14 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
 
   const leerD = function(){ return {text:'', herkunft:'leer', unklar:false, leer:true, roh:''}; };
   const reihen = [], zweifel = [];
+  const spalteSpanne = {};
+  [1,2].forEach(function(i){
+    let a = Infinity, b = -Infinity;
+    teile[i].zeilen.forEach(z => (z.woerter || []).forEach(w => {
+      if(w.bbox){ a = Math.min(a, w.bbox.x0); b = Math.max(b, w.bbox.x1); }
+    }));
+    spalteSpanne[i] = isFinite(a) ? [a, b] : null;
+  });
   let erwartet = 1;
 
   /* Zeilenweise statt nummernweise. Das Linienraster kennt auch die Zeilen, in
@@ -3133,6 +3224,67 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
         kaesten: zl.woerter.filter(w => w.bbox).map(w => ({x0:w.bbox.x0, y0:w.bbox.y0, x1:w.bbox.x1, y1:w.bbox.y1}))});
     });
 
+    /* v0.20: leere Felder, wo eines sein müsste. Nur mit Linienraster - nur
+       dort ist eine Zeile sicher eine echte Tabellenzeile - und nur, wenn eine
+       andere Inhaltsspalte derselben Zeile etwas trägt. Auf Blatt 2 sind das
+       die Bezeichnungen von 46, 47, 48: dort steht je eine Absicherung, aber
+       die Erkennung hat keinen einzigen Wortkasten gefunden. */
+    if(gitter && Object.keys(quelle).length){
+      [1,2].forEach(function(i){
+        const rolle = rollen[i] || 'bezeichnung';
+        if(quelle[rolle] || !spalteSpanne[i]) return;
+        const b = r + (basis || 0);
+        const L0 = gitter.linien[b], L1 = gitter.linien[b+1];
+        if(!L0 || !L1) return;
+        const sp = spalteSpanne[i], rechts = (i === 1) ? spalteSpanne[2] : null;
+        const xm = (sp[0] + sp[1])/2;
+        const hM = linieBei(L1, xm) - linieBei(L0, xm);
+        if(!(hM > 4)) return;
+        /* Das Band muss so hoch sein wie die Zeilen daneben. Ein viel zu
+           schmales oder zu hohes Band ist kein Feld, sondern eine Stelle, an
+           der das Raster nicht stimmt - ein Streifen daraus sammelt leicht den
+           Text der Nachbarzeile ein. Verglichen wird mit bis zu zwei Zeilen
+           darüber und darunter, damit die Perspektive nicht stört. */
+        const umgebung = [];
+        [-2, -1, 1, 2].forEach(function(d){
+          const A = gitter.linien[b + d], B = gitter.linien[b + d + 1];
+          if(A && B) umgebung.push(linieBei(B, xm) - linieBei(A, xm));
+        });
+        if(umgebung.length){
+          const hU = median(umgebung);
+          if(Math.abs(hM - hU) > 0.35*hU) return;
+        }
+        /* Der Streifen bleibt in der eigenen Spalte: reicht er bis zur
+           nächsten, läuft eine gerade Mittellinie über die ganze Breite am
+           gewellten Blatt vorbei und die Zeile rutscht aus der Mitte. */
+        const xa = Math.max(0, sp[0] - 0.4*hM);
+        const xb = rechts ? Math.min(rechts[0] - 0.3*hM, sp[1] + 4*hM) : sp[1] + 4*hM;
+        if(xb - xa < 2*hM) return;
+        const band = {xa, ta:linieBei(L0, xa), ba:linieBei(L1, xa),
+                      xb, tb:linieBei(L0, xb), bb:linieBei(L1, xb)};
+        const nachbarn = [];
+        const spanneZ = function(z2){
+          let a = Infinity, c = -Infinity;
+          (z2 && z2.woerter || []).forEach(w => { if(w.bbox){ a = Math.min(a, w.bbox.x0); c = Math.max(c, w.bbox.x1); } });
+          return isFinite(a) ? [a, c] : null;
+        };
+        if(zi >= 0 && nr[zi]) nachbarn.push(spanneZ(nr[zi]));
+        Object.keys(quelle).forEach(r2 => nachbarn.push(spanneZ(teile[quelle[r2].i].zeilen[quelle[r2].j])));
+        const spaltenKaesten = [];
+        teile[i].zeilen.forEach(function(z2){
+          let a = Infinity, c = -Infinity, o = Infinity, u = -Infinity;
+          (z2.woerter || []).forEach(w => { if(w.bbox){ a = Math.min(a, w.bbox.x0); c = Math.max(c, w.bbox.x1);
+                                                        o = Math.min(o, w.bbox.y0); u = Math.max(u, w.bbox.y1); } });
+          if(isFinite(a)) spaltenKaesten.push({x0:a, x1:c, y0:o, y1:u});
+        });
+        zweifel.push({leer:true, spalte:i, text:'', conf:0, x0:xa, x1:xb, spaltenKaesten,
+                      y: ((band.ta + band.ba)/2 + (band.tb + band.bb)/2)/2,
+                      h: ((band.ba - band.ta) + (band.bb - band.tb))/2,
+                      neigung: ((band.tb - band.ta) + (band.bb - band.ba))/2/Math.max(1, xb - xa),
+                      band, nachbarn: nachbarn.filter(Boolean), kaesten: []});
+      });
+    }
+
     reihen.push({n, bez, ort, sich, hinweis, luecke:n.luecke, erw:erwartet,
                  abgeleitet:!!n.abgeleitet,
                  fortgesetzt: !gitter && ((fortsetzung[1][zi]||[]).length + (fortsetzung[2][zi]||[]).length) > 0});
@@ -3172,7 +3324,8 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
     const tr = document.createElement('tr');
     tr.appendChild(zelle(r.n.text, r.n.roh, r.n.herkunft || 'gelesen', r.n.unklar, false, 'nr',
                          r.abgeleitet ? 'Nummer aus dem Raster' : ''));
-    const zweite = f => f.nachgelesen ? 'zweite Lesung, vorher „' + f.nachgelesen + '"' : '';
+    const zweite = f => f.nachgelesen === undefined ? '' :
+      (f.nachgelesen ? 'zweite Lesung, vorher „' + f.nachgelesen + '"' : 'zweite Lesung, vorher nicht gelesen');
     const mit = function(a, b){ return [a, b].filter(Boolean).join(' · '); };
     tr.appendChild(zelle(r.bez.text, r.bez.nachgelesen ? '' : r.bez.roh, r.bez.herkunft, r.bez.unklar, r.bez.leer, '',
                          mit(r.hinweis, zweite(r.bez))));
@@ -3189,7 +3342,8 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
     if(zeigeSich) felder.push(r.sich.leer ? '—' : r.sich.text + (r.sich.hinweis ? ' (' + r.sich.hinweis + ')' : ''));
     if(r.hinweis) felder.push('(' + r.hinweis + ')');
     [r.bez, r.ort, r.sich].forEach(function(f){
-      if(f && f.nachgelesen) felder.push('(zweite Lesung, vorher „' + f.nachgelesen + '")');
+      if(f && f.nachgelesen !== undefined)
+        felder.push(f.nachgelesen ? '(zweite Lesung, vorher „' + f.nachgelesen + '")' : '(zweite Lesung, vorher nicht gelesen)');
     });
     text += felder.join(' | ') + '\n';
   });
