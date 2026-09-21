@@ -1,7 +1,16 @@
 <!DOCTYPE html>
 <!--
   PaddleOCR-Test · Verteilerbeschreibung
-  v0.18 · 21.09.2026
+  v0.19 · 21.09.2026
+
+  v0.19: Beifang in der Nachlese. v0.18 auf dem Telefon: Schmidtgen 14 von 14,
+  alle vier Nachlesen uebernommen (72-86 % -> 97-99 %). Auf dem Dewitz-Schild
+  brachte die zweite Lesung aber "21 Fehlerstromschutzschalter" und
+  "er Stromkreis 5/6" - der Streifen reicht etwas ueber die Zelle hinaus, und
+  dort ragt durch die Perspektive die Nachbarspalte hinein. Jetzt faellt ein
+  Wort weg, dessen Mitte auf einer anderen Zelle derselben Zeile liegt; die
+  Zellen der Zeile reisen dafuer mit der Nachlese mit. Dazu steht die Dauer
+  der Nachlese im Rohtext.
 
   v0.18: die Nachlese. Auf dem Schmidtgen-Blatt lagen in v0.17 alle 14
   Eintraege in der richtigen Zeile, drei davon aber mit verlesenem Text
@@ -476,7 +485,7 @@
 
   <header>
     <h1>PaddleOCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.18 · 21.09.2026</span>
+    <span class="ver">v0.19 · 21.09.2026</span>
   </header>
 
   <div class="karte">
@@ -604,7 +613,7 @@ const MODELLE = {
   latin: {name:'v5 lateinisch',  konstante:'V5_LATIN_MOBILE_MODEL'}
 };
 
-const VERSION = 'v0.18 · 21.09.2026';
+const VERSION = 'v0.19 · 21.09.2026';
 
 /* ==================== Schrittliste ==================== */
 
@@ -1968,7 +1977,9 @@ async function lauf(){
     t0 = jetzt();
     setze('nachlese','laeuft', zweifel.length + ' Zelle(n)');
     try{
+      const tN = jetzt();
       const bericht = await nachlesen(arbeit, zweifel, info.hoehe || 40);
+      bericht.dauer = jetzt() - tN;
       const uebernommen = bericht.filter(b => b.uebernommen);
       if(uebernommen.length){
         ersetzeInErgebnis(erg, uebernommen);
@@ -2060,7 +2071,7 @@ function nachleseStreifen(arbeit, xa, xb, yc, h){
   cx.setTransform(faktor, -best.s*faktor, 0, faktor, -faktor*x0, -faktor*(ytop - best.s*xc));
   cx.drawImage(arbeit, 0, 0);
   cx.setTransform(1, 0, 0, 1, 0, 0);
-  return {canvas:c, s:best.s, faktor, hoch};
+  return {canvas:c, s:best.s, faktor, hoch, x0};
 }
 
 async function nachlesen(arbeit, zweifel, h){
@@ -2076,7 +2087,9 @@ async function nachlesen(arbeit, zweifel, h){
     try{ erg2 = await dienst.recognize(st.canvas, {noCache:true}); }catch(e){ continue; }
     const w = holeWoerter(erg2);
     const mitte = st.canvas.height/2, tol = 0.35*h*st.faktor;
-    const nah = w.filter(x => x.text && Math.abs((x.bbox.y0 + x.bbox.y1)/2 - mitte) < tol)
+    const nah = nachbarnWeg(
+                   w.filter(x => x.text && Math.abs((x.bbox.y0 + x.bbox.y1)/2 - mitte) < tol),
+                   st, z.nachbarn)
                  .sort((a, b) => a.bbox.x0 - b.bbox.x0);
     if(!nah.length) continue;
     eintrag.neu = nah.map(x => x.text).join(' ').replace(/\s+/g, ' ').trim();
@@ -2087,6 +2100,20 @@ async function nachlesen(arbeit, zweifel, h){
                           eintrag.neu !== saeubern(z.text);
   }
   return bericht;
+}
+
+/* v0.19: der Streifen reicht links und rechts etwas über die Zelle hinaus,
+   damit kein Buchstabe abgeschnitten wird. Auf dem Dewitz-Schild ragt dort
+   durch die Perspektive die Nachbarspalte hinein - die zweite Lesung brachte
+   "21 Fehlerstromschutzschalter" (die 21 von 20/21) und "er Stromkreis 5/6"
+   (das Ende von Fehlerstromschutzschalter). Ein Wort, dessen Mitte auf einer
+   anderen Zelle derselben Zeile liegt, gehört zu dieser und fällt weg. */
+function nachbarnWeg(woerter, st, nachbarn){
+  if(!nachbarn || !nachbarn.length) return woerter;
+  return woerter.filter(function(w){
+    const mx = st.x0 + ((w.bbox.x0 + w.bbox.x1)/2)/st.faktor;
+    return !nachbarn.some(n => mx > n[0] + 3 && mx < n[1] - 3);
+  });
 }
 
 /* Die Streifen im Bild-Reiter zeigen - damit auf dem Telefon zu sehen ist,
@@ -2322,7 +2349,8 @@ function verarbeite(erg, arbeit, winkel, leseDauer, nachleseBericht){
 
     if(nachleseBericht && nachleseBericht.length){
       const ueb = nachleseBericht.filter(b => b.uebernommen).length;
-      mess.push('Nachlese: ' + nachleseBericht.length + ' Zelle(n) zweifelhaft, ' + ueb + ' übernommen');
+      mess.push('Nachlese: ' + nachleseBericht.length + ' Zelle(n) zweifelhaft, ' + ueb + ' übernommen' +
+                (nachleseBericht.dauer ? ', ' + (nachleseBericht.dauer/1000).toFixed(1) + ' s' : ''));
       nachleseBericht.forEach(function(b){
         mess.push('   „' + saeubern(b.text) + '" (' + Math.round(b.conf) + ' %) -> „' + (b.neu || '–') + '" (' +
                   Math.round(b.confNeu) + ' %)' + (b.uebernommen ? '' : ' – verworfen') +
@@ -3086,7 +3114,22 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
       let x0 = Infinity, x1 = -Infinity;
       zl.woerter.forEach(w => { if(w.bbox){ x0 = Math.min(x0, w.bbox.x0); x1 = Math.max(x1, w.bbox.x1); } });
       if(!isFinite(x0)) return;
+      /* v0.19: die anderen Zellen derselben Zeile - was im Streifen auf ihnen
+         liegt, gehört zu ihnen und nicht zur nachgelesenen Zelle. */
+      const spanne = function(z2){
+        let a = Infinity, b = -Infinity;
+        (z2 && z2.woerter || []).forEach(w => { if(w.bbox){ a = Math.min(a, w.bbox.x0); b = Math.max(b, w.bbox.x1); } });
+        return isFinite(a) ? [a, b] : null;
+      };
+      const nachbarn = [];
+      if(zi >= 0 && nr[zi]) nachbarn.push(spanne(nr[zi]));
+      Object.keys(quelle).forEach(function(r2){
+        if(r2 === rolle) return;
+        const q2 = quelle[r2];
+        nachbarn.push(spanne(teile[q2.i].zeilen[q2.j]));
+      });
       zweifel.push({spalte:q.i, text:zl.text, conf, x0, x1, y:zl.mitte,
+        nachbarn: nachbarn.filter(Boolean),
         kaesten: zl.woerter.filter(w => w.bbox).map(w => ({x0:w.bbox.x0, y0:w.bbox.y0, x1:w.bbox.x1, y1:w.bbox.y1}))});
     });
 
