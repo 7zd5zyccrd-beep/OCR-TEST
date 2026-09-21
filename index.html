@@ -1,7 +1,20 @@
 <!DOCTYPE html>
 <!--
   PaddleOCR-Test · Verteilerbeschreibung
-  v0.21 · 21.09.2026
+  v0.22 · 21.09.2026
+
+  v0.22: drei Aufraeumarbeiten nach dem ersten Lauf von v0.21 (Blatt 2 und
+  Dewitz unveraendert richtig, Dewitz dabei sogar entzerrt und in der ersten
+  Lesung sauberer; Schmidtgen 13 von 14; Muench Text fast richtig, Aufbau
+  kaputt).
+   1. Zeichen aus fremden Schriften fliegen raus ("订" am Bildrand auf
+      Schmidtgen, "试单" auf Muench). Bleibt kein Buchstabe und keine Ziffer,
+      ist es kein Wort.
+   2. Zusammengeklebte Woerter werden zerlegt, wenn BEIDE Teile genau auf
+      einer Liste stehen: "RelaisFlur" -> Relais, Flur; "BadWC" -> Bad/WC.
+   3. Die Nummernreparatur fasst nur an, was nach einer Nummer aussieht -
+      mehrere Buchstaben, die keiner Ziffer aehneln, machen aus "Beleuchtung"
+      kein "819" mehr.
 
   v0.21: Entzerren vor dem Lesen, aus den Textzeilen (Jeans Gedanke: auf dem
   Papier laufen die Zeilen parallel, im Bild faechern sie auf). Anlass war
@@ -536,7 +549,7 @@
 
   <header>
     <h1>PaddleOCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.21 · 21.09.2026</span>
+    <span class="ver">v0.22 · 21.09.2026</span>
   </header>
 
   <div class="karte">
@@ -664,7 +677,7 @@ const MODELLE = {
   latin: {name:'v5 lateinisch',  konstante:'V5_LATIN_MOBILE_MODEL'}
 };
 
-const VERSION = 'v0.21 · 21.09.2026';
+const VERSION = 'v0.22 · 21.09.2026';
 
 /* ==================== Schrittliste ==================== */
 
@@ -2000,6 +2013,14 @@ function versuche(t, erwartet){
 /* Stromkreisnummern laufen aufsteigend und lückenlos. Trifft eine spätere
    Nummer, fehlt dazwischen eine Zeile – das wird gemeldet statt verschoben. */
 function nummerDeuten(roh, erwartet){
+  /* v0.22: was mehrere Buchstaben trägt, die keiner Ziffer ähneln, ist keine
+     Nummer. Auf dem Münch-Blatt landete durch eine falsche Spaltengrenze
+     "Beleuchtung" in der Nummernspalte, und die Reparatur machte "819" daraus
+     (B wie 8, l wie 1, g wie 9). Solche Zellen bleiben, wie sie sind, und
+     sind unklar. */
+  const fremd = ((roh || '').match(/[A-Za-zÄÖÜäöüß]/g) || []).filter(c => ZU_ZIFFER[c] === undefined);
+  if(fremd.length >= 2)
+    return {roh, text: saeubern(roh) || '—', geaendert:false, unklar:true, luecke:0, a:null, b:null};
   const t = nurNummer(roh);
   const erg = {roh, text: t || '—', geaendert:false, unklar:false, luecke:0, a:null, b:null};
   /* v0.17: erst die saubere Lesung im ganzen Fenster, DANN Verwechslungen.
@@ -2490,8 +2511,15 @@ function holeWoerter(erg){
       const y0 = (b.y !== undefined) ? b.y : b.y0;
       const br = (b.width  !== undefined) ? b.width  : (b.x1 - b.x0);
       const ho = (b.height !== undefined) ? b.height : (b.y1 - b.y0);
+      /* v0.22: Zeichen aus fremden Schriften fliegen raus. Die Erkennung
+         kennt auch Chinesisch und liest ein Staubkorn am Bildrand gern als
+         "订" - auf dem Schmidtgen-Blatt landete es als Ort bei 25-26 und
+         erzeugte obendrein eine dritte Spalte. Bleibt danach kein Buchstabe
+         und keine Ziffer übrig, ist es kein Wort. */
+      const text = (w.text || '').replace(/[^\u0020-\u024F\u1E00-\u1EFF\u2010-\u2027\u2030-\u205E\u20AC]/g, '').trim();
+      if(!/[0-9A-Za-zÄÖÜäöüß]/.test(text)) return;
       raus.push({
-        text: (w.text || '').trim(),
+        text,
         bbox: {x0, y0, x1: x0+br, y1: y0+ho},
         confidence: (w.confidence !== undefined ? w.confidence : 1) * 100,
         zeile: zi,
@@ -3119,6 +3147,36 @@ function sicherungDeuten(roh){
   return erg;
 }
 
+/* v0.22: zusammengeklebte Wörter in bekannte Teile zerlegen. Die zweite
+   Lesung auf Blatt 2 machte aus "Bad/WC" ein "BadWC", die entzerrte erste auf
+   dem Schmidtgen-Blatt aus "Relais Flur" ein "RelaisFlur". Zerlegt wird nur,
+   wenn BEIDE Teile genau auf einer Liste stehen - "Steckdosenring" bleibt
+   ganz, weil "ring" auf keiner steht. Zwei Orte werden mit Schrägstrich
+   verbunden, Bezeichnung und Ort mit Leerzeichen, die Bezeichnung zuerst:
+   aus "Badbeleuchtung" wird "beleuchtung Bad". */
+function listenwort(w){
+  const l = w.toLowerCase();
+  const ort = ORTE.some(x => x.toLowerCase() === l);
+  const bez = BEZEICHNUNGEN.some(x => x.toLowerCase() === l);
+  return (ort || bez) ? {ort, bez} : null;
+}
+function klebeLoesen(text){
+  return (text || '').split(' ').map(function(t){
+    const rein = t.replace(/[,;.]+$/, '');
+    const rest = t.slice(rein.length);
+    if(rein.length < 5 || !/^[A-Za-zÄÖÜäöüß-]+$/.test(rein) || listenwort(rein)) return t;
+    for(let i = 2; i <= rein.length - 2; i++){
+      const a = rein.slice(0, i), b = rein.slice(i);
+      const ka = listenwort(a), kb = listenwort(b);
+      if(!ka || !kb) continue;
+      if(ka.ort && kb.ort) return a + '/' + b + rest;
+      if(ka.ort && !kb.ort) return b + ' ' + a + rest;
+      return a + ' ' + b + rest;
+    }
+    return t;
+  }).join(' ');
+}
+
 function siehtNachWortAus(t){
   if(!t || t.length < 3) return false;
   const b = (t.match(/[A-Za-zÄÖÜäöüß]/g) || []).length;
@@ -3159,7 +3217,7 @@ function teilDeuten(teil, liste){
    bernsteinfarben gekennzeichnet. Verworfen wird nur, was nicht einmal
    nach einem Wort aussieht. */
 function feldDeuten(roh, liste){
-  const t = saeubern(roh);
+  const t = klebeLoesen(saeubern(roh));
   const erg = {roh, text:'', herkunft:'leer', unklar:false, leer:false};
   if(!t){ erg.leer = true; return erg; }
   /* v0.17: auch das Komma trennt ("Küche, Flur, Kammer"). Orte werden mit
@@ -3200,7 +3258,7 @@ function istOrtsteil(wort){
 }
 
 function bezUndOrt(roh){
-  const t = saeubern(roh);
+  const t = klebeLoesen(saeubern(roh));
   if(!t) return {bez:feldDeuten('', BEZEICHNUNGEN), ort:feldDeuten('', ORTE)};
   const woerter = t.split(' ').filter(Boolean);
   /* Nur Ortswörter in der Zelle: dann ist sie der Ort. Dass eine ganze
