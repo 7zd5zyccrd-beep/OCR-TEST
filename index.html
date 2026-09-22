@@ -1,7 +1,17 @@
 <!DOCTYPE html>
 <!--
   PaddleOCR-Test · Verteilerbeschreibung
-  v0.25 · 22.09.2026
+  v0.26 · 22.09.2026
+
+  v0.26: Nachbesserung der Nummernspalte (v0.23 griff auf dem iPhone nicht).
+  Die Erkennung liefert "8" und "Steckdosen" als ZWEI Woerter, erst die
+  Spaltenzuordnung legt sie in eine Zelle; ausgeloest wird jetzt ueber die
+  Zellen der Ankerspalte (Muench: 12 von 16 mit Woertern, sonst keine).
+  Der rechte Streifenrand kommt aus dem Tintenprofil ohne Klammerstriche
+  (Muench: Nummern 352-399, Luecke bis 415, Text ab 416): Streifen endet
+  hinter dem Nummernblock, Spaltengrenze in der Luecke. Wortkaesten innerhalb
+  einer Zeile sind nur anteilig geschaetzt - deshalb faellt links der Grenze
+  nur weg, was nach Nummer aussieht; Text ("Fl-") rueckt hinter die Grenze.
 
   v0.25 (Bedienung, Etappe 2 von 2): "Ausgewaehlte durchlaufen" liest die
   angehakten Bilder der Sammlung nacheinander, mit Fortschritt im Knopf und
@@ -596,7 +606,7 @@
 
   <header>
     <h1>PaddleOCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.25 · 22.09.2026</span>
+    <span class="ver">v0.26 · 22.09.2026</span>
   </header>
 
   <div class="karte">
@@ -754,7 +764,7 @@ const MODELLE = {
   latin: {name:'v5 lateinisch',  konstante:'V5_LATIN_MOBILE_MODEL'}
 };
 
-const VERSION = 'v0.25 · 22.09.2026';
+const VERSION = 'v0.26 · 22.09.2026';
 
 /* ==================== Schrittliste ==================== */
 
@@ -2337,12 +2347,13 @@ async function lauf(){
     const st = info.nummernStreifen, tS = jetzt();
     try{
       const nr = await nummernstreifenLesen(arbeit, st);
-      letzterNummernBericht = {x0: st.x0, x1: st.x1, anzahl: nr.woerter.length,
-        liste: nr.woerter.map(w => erstesTeil(w.text)).join(' '), striche: nr.striche,
-        klammern: nr.klammern, uebernommen: nr.woerter.length >= 3, dauer: 0};
-      if(nr.woerter.length >= 3){
+      letzterNummernBericht = nr.fehler ? {fehler: nr.fehler} :
+        {x0: st.x0, x1: st.x1, grenze: st.grenze, anzahl: nr.woerter.length,
+         liste: nr.woerter.slice().sort((p, q) => p.bbox.y0 - q.bbox.y0).map(w => erstesTeil(w.text)).join(' '),
+         striche: nr.striche, klammern: nr.klammern, uebernommen: nr.woerter.length >= 3, dauer: 0};
+      if(!nr.fehler && nr.woerter.length >= 3){
         nummernEinsetzen(erg, st, nr.woerter);
-        erzwungeneNummernGrenze = st.x1;
+        erzwungeneNummernGrenze = st.grenze;
       }
     }catch(err){
       letzterNummernBericht = {fehler: err.message};
@@ -2502,47 +2513,40 @@ function nummerAehnlich(t){
   const fremd = (t.match(/[A-Za-zÄÖÜäöüß]/g) || []).filter(c => ZU_ZIFFER[c] === undefined);
   return fremd.length < 2;
 }
-function nummernStreifenSuchen(woerter, breite, hoehe){
-  const h = zeilenBilden(woerter).hoehe || 30;
-  const N = woerter.filter(w => w.bbox.x0 < breite*0.4 && nummerAehnlich(erstesTeil(w.text)));
-  const verklebt = N.filter(w => /[A-Za-zÄÖÜäöüß]{3}/.test((w.text || '').trim().split(/\s+/).slice(1).join(' ')));
-  if(verklebt.length < 3) return null;
+function nummernStreifenSuchen(woerter, teile, breite, hoehe){
+  /* v0.26: ausgelöst von den ZELLEN der Ankerspalte, nicht von einzelnen
+     Kästen. Die Erkennung liefert "8" und "Steckdosen" als zwei Wörter; erst
+     die Spaltenzuordnung legt sie in dieselbe Zelle. Auf dem Münch-Blatt
+     tragen 12 von 16 Ankerzellen Wörter, auf den drei anderen keine. */
+  const anker = teile[0].zeilen;
+  if(anker.length < 4) return null;
+  const wortig = anker.filter(z => /[A-Za-zÄÖÜäöüß]{3}/.test(z.text || '')).length;
+  if(wortig < 3 || wortig < 0.25*anker.length) return null;
+  const h = anker.hoehe || zeilenBilden(woerter).hoehe || 30;
+  const N = [];
+  anker.forEach(z => (z.woerter || []).forEach(w => { if(nummerAehnlich(erstesTeil(w.text))) N.push(w); }));
+  if(N.length < 3) return null;
   const x0 = Math.max(0, Math.min.apply(null, N.map(w => w.bbox.x0)) - 0.4*h);
-  /* Wo der Text beginnt: die kleinste linke Kante, an der mindestens drei
-     Wörter innerhalb einer Zeilenhöhe anfangen. Ein einzelner Ausreißer -
-     ein Kasten, der ein gelöschtes Fremdzeichen noch mitträgt - zählt nicht. */
-  const textW = woerter.filter(w => (erstesTeil(w.text).match(/[A-Za-zÄÖÜäöüß]/g) || []).length >= 3 &&
-                                    w.bbox.x0 > x0 + 0.5*h);
-  const T = textW.map(w => w.bbox.x0).sort((a, b) => a - b);
-  let x1 = null;
-  for(let i = 0; i < T.length; i++){
-    let n = 0;
-    for(let j = i; j < T.length && T[j] <= T[i] + h; j++) n++;
-    if(n >= 3){ x1 = T[i] - 3; break; }
-  }
-  if(x1 === null || x1 - x0 < h || x1 - x0 > 8*h) return null;
-  const spalte = N.concat(textW.filter(w => w.bbox.x0 <= x1 + 3 + h));
-  /* 2,5 Zeilen Luft: bei geklammerten Gruppen steht der Text auf der
-     mittleren oder unteren Nummer, darüber kann noch eine stehen */
-  const y0 = Math.max(0, Math.min.apply(null, spalte.map(w => w.bbox.y0)) - 2.5*h);
-  const y1 = Math.min(hoehe, Math.max.apply(null, spalte.map(w => w.bbox.y1)) + 2.5*h);
-  return {x0, x1, y0, y1, h, verklebt: verklebt.length};
+  const xMax = Math.min(breite, x0 + 7*h);
+  /* Höhe: alle Wörter, die in diesem Band beginnen - auch die, die der erste
+     Durchlauf als Kopf verworfen hat (dort standen die Zeilen 1 bis 7) */
+  const band = woerter.filter(w => w.bbox.x0 >= x0 - h && w.bbox.x0 <= xMax);
+  if(!band.length) return null;
+  const y0 = Math.max(0, Math.min.apply(null, band.map(w => w.bbox.y0)) - 2.5*h);
+  const y1 = Math.min(hoehe, Math.max.apply(null, band.map(w => w.bbox.y1)) + 2.5*h);
+  return {x0, xMax, x1: null, grenze: null, y0, y1, h, verklebt: wortig};
 }
 
 async function nummernstreifenLesen(arbeit, st){
   const X = Math.round(st.x0), Y = Math.round(st.y0);
-  const W = Math.max(1, Math.round(st.x1 - st.x0)), H = Math.max(1, Math.round(st.y1 - st.y0));
-  /* Die Klammerstriche stehen nach dem Entzerren noch schräg (Münch: unten
-     bei x 395, bei 9/10 schon bei 411, darüber rechts vom Streifen). Gesucht
-     wird deshalb in einem etwas breiteren Fenster; geweißt und gelesen wird
-     nur der Streifen selbst. */
-  const WB = Math.max(W, Math.min(arbeit.width - X, W + Math.round(0.8*st.h)));
+  const WB = Math.max(1, Math.round(st.xMax - st.x0)), H = Math.max(1, Math.round(st.y1 - st.y0));
   const d = arbeit.getContext('2d').getImageData(X, Y, WB, H).data;
   const gb = new Uint8Array(WB*H);
   for(let i = 0, j = 0; i < WB*H; i++, j += 4) gb[i] = (d[j]*299 + d[j+1]*587 + d[j+2]*114)/1000;
   const pb = maxFilter(gb, WB, H, 10);
+  /* Klammerstriche: alles, was senkrecht länger als 1,2 Zeilenhöhen durchläuft */
   const lang = Math.round(1.2*st.h);
-  const weg = new Uint8Array(W*H), laeufe = [];
+  const weg = new Uint8Array(WB*H), laeufe = [];
   for(let x = 0; x < WB; x++){
     let a = -1;
     for(let y = 0; y <= H; y++){
@@ -2552,18 +2556,44 @@ async function nummernstreifenLesen(arbeit, st){
         if(y - a > lang){
           laeufe.push({x, a, b: y});
           for(let yy = a; yy < y; yy++) for(let dx = -2; dx <= 2; dx++){
-            const xx = x + dx; if(xx >= 0 && xx < W) weg[yy*W+xx] = 1;
+            const xx = x + dx; if(xx >= 0 && xx < WB) weg[yy*WB+xx] = 1;
           }
         }
         a = -1;
       }
     }
   }
+  /* Der rechte Rand kommt aus dem Bild, nicht aus den Wortkästen - die sind
+     innerhalb einer Zeile nur anteilig geschätzt. Ohne die Striche liegt
+     zwischen Nummern und Text eine leere Lücke (Münch: Nummern 352-399,
+     Lücke bis 415, Text ab 416). Der Streifen endet direkt hinter dem
+     Nummernblock, die Spaltengrenze liegt in der Mitte der Lücke. */
+  const roh = new Float32Array(WB);
+  for(let x = 0; x < WB; x++){
+    let n = 0;
+    for(let y = 0; y < H; y++){ const i = y*WB+x; if(!weg[i] && pb[i] - gb[i] > 60) n++; }
+    roh[x] = n;
+  }
+  const prof = new Float32Array(WB);
+  for(let x = 0; x < WB; x++) prof[x] = (roh[Math.max(0, x-1)] + roh[x] + roh[Math.min(WB-1, x+1)])/3;
+  let M = 0; for(let x = 0; x < WB; x++) if(prof[x] > M) M = prof[x];
+  let x = 0;
+  while(x < WB && prof[x] < 0.3*M) x++;
+  const nStart = x;
+  while(x < WB && prof[x] >= 0.08*M) x++;
+  const lA = x;
+  while(x < WB && prof[x] < 0.3*M) x++;
+  const tA = x;
+  if(!M || tA >= WB || tA - lA < 3 || lA - nStart < 0.5*st.h)
+    return {woerter: [], klammern: [], striche: 0, fehler: 'keine Lücke zwischen Nummern und Text gefunden'};
+  const W = Math.min(WB, lA + 3);
+  st.x1 = X + W;
+  st.grenze = X + (lA + tA)/2;
   const klein = document.createElement('canvas'); klein.width = W; klein.height = H;
   const kc = klein.getContext('2d'); const img = kc.createImageData(W, H); const o = img.data;
-  for(let y = 0; y < H; y++) for(let x = 0; x < W; x++){
-    const i = y*W + x, q = y*WB + x;
-    const v = weg[i] ? pb[q] : gb[q];
+  for(let yy = 0; yy < H; yy++) for(let xx = 0; xx < W; xx++){
+    const i = yy*W + xx, q = yy*WB + xx;
+    const v = weg[q] ? pb[q] : gb[q];
     o[i*4] = o[i*4+1] = o[i*4+2] = v; o[i*4+3] = 255;
   }
   kc.putImageData(img, 0, 0);
@@ -2578,7 +2608,6 @@ async function nummernstreifenLesen(arbeit, st){
     text: w.text, confidence: w.confidence,
     bbox: {x0: X + w.bbox.x0/f, x1: X + w.bbox.x1/f, y0: Y + w.bbox.y0/f, y1: Y + w.bbox.y1/f}
   })).filter(w => nummerAehnlich(erstesTeil(w.text)));
-  /* Klammern: lange Läufe, die sich in der Höhe überdecken, sind ein Strich */
   laeufe.sort((p, q) => p.a - q.a);
   const striche = [];
   laeufe.forEach(function(l){
@@ -2588,36 +2617,44 @@ async function nummernstreifenLesen(arbeit, st){
   });
   const klammern = striche.map(function(k){
     const drin = woerter.filter(w => { const m = (w.bbox.y0 + w.bbox.y1)/2 - Y; return m > k.a - 0.3*st.h && m < k.b + 0.3*st.h; })
-                        .map(w => erstesTeil(w.text)).filter(Boolean);
+                        .sort((p, q) => p.bbox.y0 - q.bbox.y0).map(w => erstesTeil(w.text)).filter(Boolean);
     return drin.length >= 2 ? drin[0] + '–' + drin[drin.length-1] : null;
   }).filter(Boolean);
-  return {woerter, klammern, striche: striche.length, breite: W, hoehe: H};
+  return {woerter, klammern, striche: striche.length};
 }
 
 function nummernEinsetzen(erg, st, neu){
+  const g = st.grenze;
   const mitte = b => b.y + b.height/2;
+  const hatNeu = cy => neu.some(n => Math.abs((n.bbox.y0 + n.bbox.y1)/2 - cy) < 0.5*st.h);
   const behalten = [];
   erg.lines = erg.lines.map(line => line.filter(function(w){
     const b = w.box;
     if(!b) return true;
     const cy = mitte(b);
-    if(cy < st.y0 || cy > st.y1 || b.x >= st.x1) return true;
-    if(b.x + b.width <= st.x1 + 2){
-      /* ganz im Streifen: fliegt nur raus, wenn die Streifenlesung dort
-         selbst etwas gefunden hat - sonst ginge eine Nummer verloren */
-      return !neu.some(n => Math.abs((n.bbox.y0 + n.bbox.y1)/2 - cy) < 0.5*st.h);
-    }
+    if(cy < st.y0 || cy > st.y1 || b.x >= g) return true;
     const teile = (w.text || '').trim().split(/\s+/);
+    if(b.x + b.width <= g + 2){
+      /* ganz links der Grenze: eine Nummer fliegt raus, wenn der Streifen
+         dort selbst eine gelesen hat; alles andere ist Text, dessen Kasten
+         nur geschätzt zu weit links liegt ("Fl-" aus "9 Fl- Schutzschalter"),
+         und rückt hinter die Grenze */
+      if(nummerAehnlich(teile[0]) && teile.length === 1) return !hatNeu(cy);
+      if(teile.length > 1 && nummerAehnlich(teile[0])){
+        if(!hatNeu(cy)) behalten.push({text: teile[0], confidence: w.confidence,
+                                       box: {x: b.x, y: b.y, width: Math.max(1, g - b.x - 1), height: b.height}});
+        w.text = teile.slice(1).join(' ');
+      }
+      b.width = Math.max(1, b.width); b.x = g + 1;
+      return true;
+    }
     if(teile.length > 1 && nummerAehnlich(teile[0])){
       w.text = teile.slice(1).join(' ');
-      /* Hat die Streifenlesung hier selbst keine Nummer gefunden, bleibt die
-         alte als eigener Kasten stehen, statt verloren zu gehen. */
-      if(!neu.some(n => Math.abs((n.bbox.y0 + n.bbox.y1)/2 - cy) < 0.5*st.h))
-        behalten.push({text: teile[0], confidence: w.confidence,
-                       box: {x: b.x, y: b.y, width: Math.max(1, st.x1 - b.x), height: b.height}});
+      if(!hatNeu(cy)) behalten.push({text: teile[0], confidence: w.confidence,
+                                     box: {x: b.x, y: b.y, width: Math.max(1, g - b.x - 1), height: b.height}});
     }
     const rechts = b.x + b.width;
-    b.x = st.x1 + 1; b.width = Math.max(1, rechts - b.x);
+    b.x = g + 1; b.width = Math.max(1, rechts - b.x);
     return true;
   })).filter(line => line.length);
   behalten.forEach(k => erg.lines.push([k]));
@@ -2799,10 +2836,7 @@ function verarbeite(erg, arbeit, winkel, leseDauer, nachleseBericht){
   /* 1. Sicherheitsschwelle */
   alle.forEach(w => { if(w.confidence < schwelle) w.behalten = false; });
 
-  if(erzwungeneNummernGrenze === null && spalten){
-    try{ rueck.nummernStreifen = nummernStreifenSuchen(alle.filter(w => w.behalten), arbeit.width, arbeit.height); }
-    catch(e){ rueck.nummernStreifen = null; }
-  }
+  const vorKopf = alle.filter(w => w.behalten);
 
   /* 2. Kopf abschneiden: alles oberhalb der obersten lesbaren Stromkreisnummer
         im linken Drittel. Der Firmenkopf sitzt darüber und gehört nicht dazu. */
@@ -2864,6 +2898,10 @@ function verarbeite(erg, arbeit, winkel, leseDauer, nachleseBericht){
       {name:'Bezeichnung', zeilen: zeilenBilden(gruppen[1])},
       {name:'Ort',         zeilen: zeilenBilden(gruppen[2])}
     ];
+    if(erzwungeneNummernGrenze === null){
+      try{ rueck.nummernStreifen = nummernStreifenSuchen(vorKopf, teile, arbeit.width, arbeit.height); }
+      catch(e){ rueck.nummernStreifen = null; }
+    }
 
     /* Messwerte: die tatsächlichen Höhen der Zeilenmitten je Spalte. Ohne die
        rechne ich gegen ein erfundenes Blatt statt gegen deins. */
@@ -2933,8 +2971,9 @@ function verarbeite(erg, arbeit, winkel, leseDauer, nachleseBericht){
     mess.push('Zeilen kommen von: ' + (gitter ? 'den gedruckten Linien' : (raster ? 'dem Zeilengesetz der Nummernspalte' : 'nichts – Zuordnung wie in v0.9')));
     if(letzterNummernBericht){
       const b = letzterNummernBericht;
-      mess.push(b.fehler ? 'Nummernspalte eigens gelesen: Fehler – ' + b.fehler
+      mess.push(b.fehler ? 'Nummernspalte eigens lesen: abgebrochen – ' + b.fehler
         : 'Nummernspalte eigens gelesen: Streifen x ' + Math.round(b.x0) + '–' + Math.round(b.x1) +
+          ', Spaltengrenze ' + Math.round(b.grenze) +
           ', ' + b.anzahl + ' Nummern (' + b.liste + ')' + (b.uebernommen ? '' : ' – nicht übernommen, zu wenige') +
           ', ' + b.striche + ' Klammerstrich(e) entfernt' + (b.klammern.length ? ', Klammern: ' + b.klammern.join(', ') : '') +
           ', ' + Math.round(b.dauer) + ' ms');
