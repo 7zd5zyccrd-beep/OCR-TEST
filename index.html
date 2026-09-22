@@ -1,7 +1,13 @@
 <!DOCTYPE html>
 <!--
   PaddleOCR-Test · Verteilerbeschreibung
-  v0.26 · 22.09.2026
+  v0.27 · 22.09.2026
+
+  v0.27: der eigentliche Grund, warum die Nummernspalte auf dem Muench-Blatt
+  nie gelesen wurde - verarbeite() legte sein Rueckgabeobjekt nach dem
+  Tabellenbau NEU an, der gefundene Streifen fiel dabei heraus und kam nie
+  beim Ablauf an (weder "eigens gelesen" noch "abgebrochen" im Bericht).
+  Jetzt wird ergaenzt statt ersetzt.
 
   v0.26: Nachbesserung der Nummernspalte (v0.23 griff auf dem iPhone nicht).
   Die Erkennung liefert "8" und "Steckdosen" als ZWEI Woerter, erst die
@@ -606,7 +612,7 @@
 
   <header>
     <h1>PaddleOCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.26 · 22.09.2026</span>
+    <span class="ver">v0.27 · 22.09.2026</span>
   </header>
 
   <div class="karte">
@@ -764,7 +770,7 @@ const MODELLE = {
   latin: {name:'v5 lateinisch',  konstante:'V5_LATIN_MOBILE_MODEL'}
 };
 
-const VERSION = 'v0.26 · 22.09.2026';
+const VERSION = 'v0.27 · 22.09.2026';
 
 /* ==================== Schrittliste ==================== */
 
@@ -2997,8 +3003,10 @@ function verarbeite(erg, arbeit, winkel, leseDauer, nachleseBericht){
     const gebaut = baueTabelle(teile, nach, raster, rv.rollen, gitter, basis, warnung);
     ziel.appendChild(gebaut.knoten);
     tabellenText = gebaut.text;
-    rueck = {zweifel: gebaut.zweifel || [],
-             hoehe: (gitter && gitter.hoehe) || (raster && raster.hoehe) || nrZ.hoehe || 40};
+    /* v0.27: ergänzen statt ersetzen - sonst fällt der gefundene Nummernstreifen
+       heraus (daran scheiterten v0.23 und v0.26 auf dem Münch-Blatt) */
+    rueck = Object.assign(rueck, {zweifel: gebaut.zweifel || [],
+             hoehe: (gitter && gitter.hoehe) || (raster && raster.hoehe) || nrZ.hoehe || 40});
 
     if(nachleseBericht && nachleseBericht.length){
       const ueb = nachleseBericht.filter(b => b.uebernommen).length;
