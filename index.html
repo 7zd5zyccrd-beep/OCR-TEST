@@ -1,7 +1,33 @@
 <!DOCTYPE html>
 <!--
   PaddleOCR-Test · Verteilerbeschreibung
-  v0.22 · 21.09.2026
+  v0.25 · 22.09.2026
+
+  v0.25 (Bedienung, Etappe 2 von 2): "Ausgewaehlte durchlaufen" liest die
+  angehakten Bilder der Sammlung nacheinander, mit Fortschritt im Knopf und
+  einer Ergebnisliste (Zeilen, entzerrt/gedreht, Dauer; Antippen liest das
+  Blatt noch einmal einzeln). "Ergebnisse kopieren" legt alles in einem
+  Block ab: Umgebung einmal oben, je Blatt Rohtext, Tabelle, Messwerte und
+  statt der Ernte-Datei eine knappe Zellenliste (Zeile | Spalte | Text |
+  Sicherheit | y | x | Rest | vorher). Die Ernte wird bei jedem Lauf
+  zurueckgesetzt, damit nie ein altes Blatt mitkopiert wird.
+
+  v0.24 (Bedienung, Etappe 1 von 2): Sammlung. Beispielbilder dauerhaft im
+  Geraet (IndexedDB, Original unveraendert als Bytefolge plus Vorschaubild),
+  Kachelansicht mit Haekchen zur Auswahl (wird mitgespeichert), Vollansicht
+  mit Einpassen/Originalgroesse, Umbenennen, Loeschen, einzeln Lesen, und
+  "Originale teilen" ueber das iOS-Teilen-Menue (dort "Kopieren", dann im
+  Chat einfuegen). Etappe 2 (v0.25): ausgewaehlte nacheinander durchlaufen,
+  alle Ergebnisse mit einer knappen Zellenliste in einem Block kopieren.
+
+  v0.23: die Nummernspalte eigens lesen (Muench-Blatt). Greift nur, wenn
+  mindestens drei Kaesten mit einer Nummer beginnen und danach ein Wort
+  tragen ("8 Steckdosen"). Streifen links vom Text ausschneiden, senkrechte
+  Laeufe laenger als 1,2 Zeilenhoehen entfernen (die Klammerstriche),
+  dreifach vergroessert allein lesen; die Nummern werden Anker, die
+  Spaltengrenze kommt an den Streifenrand, zusammengeklebte Kaesten verlieren
+  ihre vorangestellte Nummer. Die Klammern werden gemessen und im Rohtext
+  gemeldet (Geraeteaufteilung), sonst noch nicht verwendet.
 
   v0.22: drei Aufraeumarbeiten nach dem ersten Lauf von v0.21 (Blatt 2 und
   Dewitz unveraendert richtig, Dewitz dabei sogar entzerrt und in der ersten
@@ -542,6 +568,27 @@
   table.ernte td.warn{color:var(--bernstein);font-weight:600}
   .gesetz{font-size:13px;color:var(--grau);margin:0 0 12px;line-height:1.5}
   .gesetz b{color:var(--dunkel);font-weight:640}
+/* v0.24: Sammlung */
+.kacheln{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:10px;margin-top:12px}
+.kachel{position:relative;border:1px solid var(--linie, #ccc);border-radius:10px;overflow:hidden;background:#f4f4f4}
+.kachel.an{outline:3px solid #2f6fd6;outline-offset:-3px}
+.kachel img{cursor:pointer;display:block;width:100%;aspect-ratio:3/4;object-fit:cover;background:#ddd}
+.kachel .kname{font-size:12px;line-height:1.3;padding:4px 6px 6px;word-break:break-word;min-height:2.6em}
+.kachel .haken{cursor:pointer;position:absolute;top:6px;right:6px;width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,.9);
+  border:2px solid #2f6fd6;display:flex;align-items:center;justify-content:center;font-size:16px;color:#2f6fd6;font-weight:700}
+.kachel:not(.an) .haken{border-color:#999;color:transparent}
+#voll{position:fixed;inset:0;z-index:50;background:#111;display:none;flex-direction:column;
+  padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+#voll.an{display:flex}
+#vollBild{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;display:flex;align-items:center;justify-content:center}
+#vollBild.eins{display:block}
+#vollBild img{cursor:pointer;max-width:100%;max-height:100%;object-fit:contain}
+#vollBild.eins img{max-width:none;max-height:none}
+#voll .leiste{display:flex;flex-wrap:wrap;gap:8px;padding:10px;background:#222;color:#eee;align-items:center}
+#voll .leiste b{flex:1 1 100%;font-size:14px;font-weight:600}
+#voll .leiste button{flex:1 1 auto}
+.stapelzeile{cursor:pointer;padding:8px 10px;border:1px solid var(--linie, #ccc);border-radius:8px;margin-top:6px;font-size:14px}
+.stapelzeile small{display:block;color:#666;margin-top:2px}
 </style>
 </head>
 <body>
@@ -549,7 +596,7 @@
 
   <header>
     <h1>PaddleOCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.22 · 21.09.2026</span>
+    <span class="ver">v0.25 · 22.09.2026</span>
   </header>
 
   <div class="karte">
@@ -581,6 +628,23 @@
       <button class="still" id="neuladen">App neu laden</button>
     </div>
     <p class="hinweis">Beim ersten Mal werden die Modelle geladen, das braucht Netz. Ein Modellwechsel startet den Dienst neu. „App neu laden" holt die Seite frisch vom Server, wenn GitHub Pages noch die alte Fassung ausliefert; die Modelle bleiben dabei im Gerät.</p>
+  </div>
+
+  <div class="karte" id="sammlungskarte">
+    <h2>Sammlung</h2>
+    <div class="knopfreihe">
+      <label class="knopf" for="sammlungDatei">Bilder hinzufügen</label>
+      <input type="file" id="sammlungDatei" accept="image/*" multiple>
+      <button class="still" id="sammlungAlle">Alle auswählen</button>
+      <button class="still" id="sammlungTeilen" disabled>Originale teilen</button>
+    </div>
+    <div class="knopfreihe" style="margin-top:10px">
+      <button id="stapelLos" disabled>Ausgewählte durchlaufen</button>
+      <button class="still" id="stapelKopieren" disabled>Ergebnisse kopieren</button>
+    </div>
+    <div id="stapelListe" style="margin-top:10px"></div>
+    <div class="kacheln" id="kacheln"></div>
+    <p class="hinweis" id="sammlungInfo">Die Bilder bleiben im Gerät gespeichert. Häkchen antippen wählt aus, das Bild antippen öffnet die Vollansicht.</p>
   </div>
 
   <div class="karte" id="fotokarte" style="display:none">
@@ -652,6 +716,19 @@
     <pre id="umgebung"></pre>
   </div>
 
+  <div id="voll">
+    <div id="vollBild"><img id="vollImg" alt=""></div>
+    <div class="leiste">
+      <b id="vollName"></b>
+      <button class="still" id="vollGroesse">Originalgröße</button>
+      <button class="still" id="vollUmbenennen">Umbenennen</button>
+      <button class="still" id="vollTeilen">Teilen</button>
+      <button class="still" id="vollLesen">Lesen</button>
+      <button class="still" id="vollLoeschen">Löschen</button>
+      <button id="vollZu">Schließen</button>
+    </div>
+  </div>
+
 </div>
 
 <script type="module">
@@ -677,7 +754,7 @@ const MODELLE = {
   latin: {name:'v5 lateinisch',  konstante:'V5_LATIN_MOBILE_MODEL'}
 };
 
-const VERSION = 'v0.22 · 21.09.2026';
+const VERSION = 'v0.25 · 22.09.2026';
 
 /* ==================== Schrittliste ==================== */
 
@@ -1054,6 +1131,8 @@ function entzerrenNachFluchtpunkt(canvas, vp){
 }
 
 let letzteEntzerrung = null;
+let erzwungeneNummernGrenze = null;   /* v0.23: Spaltengrenze aus dem Nummernstreifen */
+let letzterNummernBericht = null;
 
 function drehenUm(canvas, grad){
   if(Math.abs(grad) < 0.12) return canvas;
@@ -2150,6 +2229,11 @@ const leinwand = document.getElementById('leinwand');
 document.getElementById('datei').addEventListener('change', async function(e){
   const datei = e.target.files && e.target.files[0];
   if(!datei || !dienst) return;
+  await bildAnnehmen(datei, datei.name || '');
+});
+
+/* v0.24: ein Bild annehmen - aus dem Fotoalbum oder aus der Sammlung */
+async function bildAnnehmen(datei, dateiname){
   let t0 = jetzt();
   setze('foto','laeuft');
   try{
@@ -2171,27 +2255,31 @@ document.getElementById('datei').addEventListener('change', async function(e){
     ctx.drawImage(bm, 0, 0, c.width, c.height);
     if(bm.close) bm.close();
     quelle = c;
-    letzterDateiname = datei.name || '';
+    letzterDateiname = dateiname || datei.name || '';
     document.getElementById('fotoinfo').textContent =
       c.width + ' × ' + c.height + ' Bildpunkte, ' + Math.round(datei.size/1024) + ' KB';
     setze('foto','gut','', jetzt()-t0);
     document.getElementById('nochmal').disabled = false;
   }catch(err){
     setze('foto','schlecht', err.message, jetzt()-t0);
-    return;
+    return false;
   }
   await lauf();
-});
+  return true;
+}
 
 document.getElementById('nochmal').addEventListener('click', lauf);
 
 async function lauf(){
   if(!quelle || !dienst) return;
+  letzteErnte = null;
   document.getElementById('nochmal').disabled = true;
 
   let winkel = 0;
   let arbeit = quelle;
   letzteEntzerrung = null;
+  erzwungeneNummernGrenze = null;
+  letzterNummernBericht = null;
   if(document.getElementById('optEntzerren').checked){
     const tE = jetzt();
     let vp = null, gefunden = 0;
@@ -2241,6 +2329,26 @@ async function lauf(){
     setze('nach','gut','', jetzt()-t0);
   }catch(err){
     setze('nach','schlecht', err.message, jetzt()-t0);
+  }
+
+  /* v0.23: Nummernspalte eigens lesen, wenn die Erkennung Nummern und Text
+     in gemeinsame Kästen gelegt hat */
+  if(info && info.nummernStreifen){
+    const st = info.nummernStreifen, tS = jetzt();
+    try{
+      const nr = await nummernstreifenLesen(arbeit, st);
+      letzterNummernBericht = {x0: st.x0, x1: st.x1, anzahl: nr.woerter.length,
+        liste: nr.woerter.map(w => erstesTeil(w.text)).join(' '), striche: nr.striche,
+        klammern: nr.klammern, uebernommen: nr.woerter.length >= 3, dauer: 0};
+      if(nr.woerter.length >= 3){
+        nummernEinsetzen(erg, st, nr.woerter);
+        erzwungeneNummernGrenze = st.x1;
+      }
+    }catch(err){
+      letzterNummernBericht = {fehler: err.message};
+    }
+    if(letzterNummernBericht) letzterNummernBericht.dauer = jetzt() - tS;
+    try{ info = verarbeite(erg, arbeit, winkel, leseDauer, null); }catch(err){}
   }
 
   /* Nachlese: Zellen, die die Deutung nicht einordnen kann oder die mit
@@ -2366,6 +2474,155 @@ function nachleseStreifen(arbeit, xa, xb, yc, h, opt){
   cx.drawImage(arbeit, 0, 0);
   cx.setTransform(1, 0, 0, 1, 0, 0);
   return {canvas:c, s:best.s, faktor, hoch, x0};
+}
+
+/* ==================== Nummernspalte eigens lesen (v0.23) ====================
+
+   Anlass: das Münch-Blatt. Dort stehen die Nummern so dicht am Text, dass
+   die Erkennung sie mit dem ersten Wort zusammen in einen Kasten legt
+   ("8 Steckdosen", "9 Fl- Schutzschalter"), und die Klammerstriche, die FI,
+   Hauptschalter und E-Herd über mehrere Nummern zusammenfassen, füllen die
+   ohnehin schmale Lücke. Nachgemessen am entzerrten Ausschnitt: Nummern bei
+   x 350-395, Striche 395-416, Text ab 420. Die Spaltensuche fand dort keine
+   Grenze und setzte sie zwischen linken und rechten Text.
+
+   Abhilfe wie bei der Nachlese, nur für die ganze Spalte: den Streifen links
+   vom Text ausschneiden, alles entfernen, was senkrecht länger als eine
+   Zeilenhöhe durchläuft (die Klammern), dreifach vergrößern und allein lesen.
+   Die Nummern werden zum Anker, die Spaltengrenze kommt an den Streifenrand,
+   und zusammengeklebte Kästen verlieren ihre vorangestellte Nummer.
+
+   Greift nur, wenn mindestens drei Kästen mit einer Nummer beginnen und
+   danach ein Wort tragen - auf den drei fertigen Blättern kommt das nicht
+   vor. Die Klammern werden gemessen und gemeldet, sonst nicht verwendet. */
+function erstesTeil(t){ return ((t || '').trim().split(/\s+/)[0]) || ''; }
+function nummerAehnlich(t){
+  if(!t || t.length > 6) return false;
+  if(!/[0-9]/.test(nurNummer(t))) return false;
+  const fremd = (t.match(/[A-Za-zÄÖÜäöüß]/g) || []).filter(c => ZU_ZIFFER[c] === undefined);
+  return fremd.length < 2;
+}
+function nummernStreifenSuchen(woerter, breite, hoehe){
+  const h = zeilenBilden(woerter).hoehe || 30;
+  const N = woerter.filter(w => w.bbox.x0 < breite*0.4 && nummerAehnlich(erstesTeil(w.text)));
+  const verklebt = N.filter(w => /[A-Za-zÄÖÜäöüß]{3}/.test((w.text || '').trim().split(/\s+/).slice(1).join(' ')));
+  if(verklebt.length < 3) return null;
+  const x0 = Math.max(0, Math.min.apply(null, N.map(w => w.bbox.x0)) - 0.4*h);
+  /* Wo der Text beginnt: die kleinste linke Kante, an der mindestens drei
+     Wörter innerhalb einer Zeilenhöhe anfangen. Ein einzelner Ausreißer -
+     ein Kasten, der ein gelöschtes Fremdzeichen noch mitträgt - zählt nicht. */
+  const textW = woerter.filter(w => (erstesTeil(w.text).match(/[A-Za-zÄÖÜäöüß]/g) || []).length >= 3 &&
+                                    w.bbox.x0 > x0 + 0.5*h);
+  const T = textW.map(w => w.bbox.x0).sort((a, b) => a - b);
+  let x1 = null;
+  for(let i = 0; i < T.length; i++){
+    let n = 0;
+    for(let j = i; j < T.length && T[j] <= T[i] + h; j++) n++;
+    if(n >= 3){ x1 = T[i] - 3; break; }
+  }
+  if(x1 === null || x1 - x0 < h || x1 - x0 > 8*h) return null;
+  const spalte = N.concat(textW.filter(w => w.bbox.x0 <= x1 + 3 + h));
+  /* 2,5 Zeilen Luft: bei geklammerten Gruppen steht der Text auf der
+     mittleren oder unteren Nummer, darüber kann noch eine stehen */
+  const y0 = Math.max(0, Math.min.apply(null, spalte.map(w => w.bbox.y0)) - 2.5*h);
+  const y1 = Math.min(hoehe, Math.max.apply(null, spalte.map(w => w.bbox.y1)) + 2.5*h);
+  return {x0, x1, y0, y1, h, verklebt: verklebt.length};
+}
+
+async function nummernstreifenLesen(arbeit, st){
+  const X = Math.round(st.x0), Y = Math.round(st.y0);
+  const W = Math.max(1, Math.round(st.x1 - st.x0)), H = Math.max(1, Math.round(st.y1 - st.y0));
+  /* Die Klammerstriche stehen nach dem Entzerren noch schräg (Münch: unten
+     bei x 395, bei 9/10 schon bei 411, darüber rechts vom Streifen). Gesucht
+     wird deshalb in einem etwas breiteren Fenster; geweißt und gelesen wird
+     nur der Streifen selbst. */
+  const WB = Math.max(W, Math.min(arbeit.width - X, W + Math.round(0.8*st.h)));
+  const d = arbeit.getContext('2d').getImageData(X, Y, WB, H).data;
+  const gb = new Uint8Array(WB*H);
+  for(let i = 0, j = 0; i < WB*H; i++, j += 4) gb[i] = (d[j]*299 + d[j+1]*587 + d[j+2]*114)/1000;
+  const pb = maxFilter(gb, WB, H, 10);
+  const lang = Math.round(1.2*st.h);
+  const weg = new Uint8Array(W*H), laeufe = [];
+  for(let x = 0; x < WB; x++){
+    let a = -1;
+    for(let y = 0; y <= H; y++){
+      const t = y < H && (pb[y*WB+x] - gb[y*WB+x] > 60);
+      if(t && a < 0) a = y;
+      if(!t && a >= 0){
+        if(y - a > lang){
+          laeufe.push({x, a, b: y});
+          for(let yy = a; yy < y; yy++) for(let dx = -2; dx <= 2; dx++){
+            const xx = x + dx; if(xx >= 0 && xx < W) weg[yy*W+xx] = 1;
+          }
+        }
+        a = -1;
+      }
+    }
+  }
+  const klein = document.createElement('canvas'); klein.width = W; klein.height = H;
+  const kc = klein.getContext('2d'); const img = kc.createImageData(W, H); const o = img.data;
+  for(let y = 0; y < H; y++) for(let x = 0; x < W; x++){
+    const i = y*W + x, q = y*WB + x;
+    const v = weg[i] ? pb[q] : gb[q];
+    o[i*4] = o[i*4+1] = o[i*4+2] = v; o[i*4+3] = 255;
+  }
+  kc.putImageData(img, 0, 0);
+  const f = 3;
+  const gross = document.createElement('canvas'); gross.width = W*f; gross.height = H*f;
+  const gc = gross.getContext('2d');
+  gc.imageSmoothingEnabled = true; gc.imageSmoothingQuality = 'high';
+  gc.fillStyle = '#fff'; gc.fillRect(0, 0, gross.width, gross.height);
+  gc.drawImage(klein, 0, 0, gross.width, gross.height);
+  const erg2 = await dienst.recognize(gross, {noCache:true});
+  const woerter = holeWoerter(erg2).map(w => ({
+    text: w.text, confidence: w.confidence,
+    bbox: {x0: X + w.bbox.x0/f, x1: X + w.bbox.x1/f, y0: Y + w.bbox.y0/f, y1: Y + w.bbox.y1/f}
+  })).filter(w => nummerAehnlich(erstesTeil(w.text)));
+  /* Klammern: lange Läufe, die sich in der Höhe überdecken, sind ein Strich */
+  laeufe.sort((p, q) => p.a - q.a);
+  const striche = [];
+  laeufe.forEach(function(l){
+    const s2 = striche.find(k => Math.min(k.b, l.b) - Math.max(k.a, l.a) > 0.5*Math.min(k.b - k.a, l.b - l.a));
+    if(s2){ s2.a = Math.min(s2.a, l.a); s2.b = Math.max(s2.b, l.b); }
+    else striche.push({a: l.a, b: l.b});
+  });
+  const klammern = striche.map(function(k){
+    const drin = woerter.filter(w => { const m = (w.bbox.y0 + w.bbox.y1)/2 - Y; return m > k.a - 0.3*st.h && m < k.b + 0.3*st.h; })
+                        .map(w => erstesTeil(w.text)).filter(Boolean);
+    return drin.length >= 2 ? drin[0] + '–' + drin[drin.length-1] : null;
+  }).filter(Boolean);
+  return {woerter, klammern, striche: striche.length, breite: W, hoehe: H};
+}
+
+function nummernEinsetzen(erg, st, neu){
+  const mitte = b => b.y + b.height/2;
+  const behalten = [];
+  erg.lines = erg.lines.map(line => line.filter(function(w){
+    const b = w.box;
+    if(!b) return true;
+    const cy = mitte(b);
+    if(cy < st.y0 || cy > st.y1 || b.x >= st.x1) return true;
+    if(b.x + b.width <= st.x1 + 2){
+      /* ganz im Streifen: fliegt nur raus, wenn die Streifenlesung dort
+         selbst etwas gefunden hat - sonst ginge eine Nummer verloren */
+      return !neu.some(n => Math.abs((n.bbox.y0 + n.bbox.y1)/2 - cy) < 0.5*st.h);
+    }
+    const teile = (w.text || '').trim().split(/\s+/);
+    if(teile.length > 1 && nummerAehnlich(teile[0])){
+      w.text = teile.slice(1).join(' ');
+      /* Hat die Streifenlesung hier selbst keine Nummer gefunden, bleibt die
+         alte als eigener Kasten stehen, statt verloren zu gehen. */
+      if(!neu.some(n => Math.abs((n.bbox.y0 + n.bbox.y1)/2 - cy) < 0.5*st.h))
+        behalten.push({text: teile[0], confidence: w.confidence,
+                       box: {x: b.x, y: b.y, width: Math.max(1, st.x1 - b.x), height: b.height}});
+    }
+    const rechts = b.x + b.width;
+    b.x = st.x1 + 1; b.width = Math.max(1, rechts - b.x);
+    return true;
+  })).filter(line => line.length);
+  behalten.forEach(k => erg.lines.push([k]));
+  neu.forEach(n => erg.lines.push([{text: n.text, confidence: n.confidence/100,
+    box: {x: n.bbox.x0, y: n.bbox.y0, width: n.bbox.x1 - n.bbox.x0, height: n.bbox.y1 - n.bbox.y0}}]));
 }
 
 async function nachlesen(arbeit, zweifel, h){
@@ -2542,6 +2799,11 @@ function verarbeite(erg, arbeit, winkel, leseDauer, nachleseBericht){
   /* 1. Sicherheitsschwelle */
   alle.forEach(w => { if(w.confidence < schwelle) w.behalten = false; });
 
+  if(erzwungeneNummernGrenze === null && spalten){
+    try{ rueck.nummernStreifen = nummernStreifenSuchen(alle.filter(w => w.behalten), arbeit.width, arbeit.height); }
+    catch(e){ rueck.nummernStreifen = null; }
+  }
+
   /* 2. Kopf abschneiden: alles oberhalb der obersten lesbaren Stromkreisnummer
         im linken Drittel. Der Firmenkopf sitzt darüber und gehört nicht dazu. */
   let schnitt = null;
@@ -2569,7 +2831,14 @@ function verarbeite(erg, arbeit, winkel, leseDauer, nachleseBericht){
   /* 3. Spalten */
   let grenzen = null, gruppen = null;
   if(spalten && gueltig.length){
-    const gr = spaltenFinden(gueltig, arbeit.width);
+    let gr = spaltenFinden(gueltig, arbeit.width);
+    if(erzwungeneNummernGrenze !== null){
+      /* v0.23: die Grenze Nummer/Text kommt aus dem Nummernstreifen; von
+         den selbst gefundenen Grenzen zählt nur die nächste rechts davon */
+      const gz = erzwungeneNummernGrenze, hz = (gr && gr.hoehe) || 30;
+      const kand = gr ? [gr.g0, gr.g1].filter(v => isFinite(v) && v > gz + 2*hz) : [];
+      gr = {g0: gz, g1: kand.length ? Math.min.apply(null, kand) : Infinity, hoehe: hz, zweispaltig: !kand.length};
+    }
     if(gr){
       grenzen = [gr.g0, gr.g1];
       gruppen = zuordnen(gueltig, gr.g0, gr.g1);
@@ -2662,6 +2931,14 @@ function verarbeite(erg, arbeit, winkel, leseDauer, nachleseBericht){
     });
     if(getrennt) mess.push('Nachgetrennt: ' + getrennt + ' zusammengefallene Zelle(n)');
     mess.push('Zeilen kommen von: ' + (gitter ? 'den gedruckten Linien' : (raster ? 'dem Zeilengesetz der Nummernspalte' : 'nichts – Zuordnung wie in v0.9')));
+    if(letzterNummernBericht){
+      const b = letzterNummernBericht;
+      mess.push(b.fehler ? 'Nummernspalte eigens gelesen: Fehler – ' + b.fehler
+        : 'Nummernspalte eigens gelesen: Streifen x ' + Math.round(b.x0) + '–' + Math.round(b.x1) +
+          ', ' + b.anzahl + ' Nummern (' + b.liste + ')' + (b.uebernommen ? '' : ' – nicht übernommen, zu wenige') +
+          ', ' + b.striche + ' Klammerstrich(e) entfernt' + (b.klammern.length ? ', Klammern: ' + b.klammern.join(', ') : '') +
+          ', ' + Math.round(b.dauer) + ' ms');
+    }
     if(letzteEntzerrung){
       const e = letzteEntzerrung;
       mess.push(e.art === 'textzeilen'
@@ -3853,6 +4130,301 @@ document.getElementById('bildTeilen').addEventListener('click', function(){
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
   }, 'image/png');
 });
+
+/* ==================== Sammlung (v0.24) ====================
+
+   Jeans Wunsch: die Beispielbilder dauerhaft in der App, mit Vorschau und
+   Vollansicht, auswählbar, und die Originale von hier aus teilen. Gespeichert
+   wird im Gerät (IndexedDB), das Original unverändert als Bytefolge - Blobs
+   in IndexedDB waren unter iOS nicht immer zuverlässig - dazu ein kleines
+   Vorschaubild. Die Auswahl wird mitgespeichert. Etappe 2 bringt den
+   Durchlauf der ausgewählten Bilder und das Kopieren aller Ergebnisse. */
+const SAMMLUNG_DB = 'paddleSammlung';
+function sammlungOeffnen(){
+  return new Promise(function(res, rej){
+    const r = indexedDB.open(SAMMLUNG_DB, 1);
+    r.onupgradeneeded = () => { r.result.createObjectStore('bilder', {keyPath:'id'}); };
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function sammlungTx(modus, arbeitF){
+  const db = await sammlungOeffnen();
+  return new Promise(function(res, rej){
+    const tx = db.transaction('bilder', modus), st = tx.objectStore('bilder');
+    let ergebnis;
+    Promise.resolve(arbeitF(st, v => { ergebnis = v; })).catch(rej);
+    tx.oncomplete = () => { db.close(); res(ergebnis); };
+    tx.onerror = () => { db.close(); rej(tx.error); };
+    tx.onabort = () => { db.close(); rej(tx.error); };
+  });
+}
+function sammlungAlle(){
+  return sammlungTx('readonly', function(st, fertig){
+    const r = st.getAll(); r.onsuccess = () => fertig((r.result || []).sort((a, b) => a.reihe - b.reihe));
+  });
+}
+function sammlungSchreiben(eintrag){ return sammlungTx('readwrite', st => { st.put(eintrag); }); }
+function sammlungEntfernen(id){ return sammlungTx('readwrite', st => { st.delete(id); }); }
+
+async function vorschauMachen(datei){
+  let bm;
+  try{ bm = await createImageBitmap(datei, {imageOrientation:'from-image'}); }
+  catch(e){
+    bm = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = URL.createObjectURL(datei); });
+  }
+  const f = Math.min(1, 320/Math.max(bm.width, bm.height));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(bm.width*f)); c.height = Math.max(1, Math.round(bm.height*f));
+  const ctx = c.getContext('2d'); ctx.imageSmoothingQuality = 'high'; ctx.drawImage(bm, 0, 0, c.width, c.height);
+  const breite = bm.width, hoehe = bm.height;
+  if(bm.close) bm.close();
+  const blob = await new Promise(res => c.toBlob(res, 'image/jpeg', 0.8));
+  return {vorschau: blob ? await blob.arrayBuffer() : null, breite, hoehe};
+}
+
+let sammlung = [];
+const bildUrl = {};
+function urlFuer(e, welches){
+  const k = e.id + ':' + welches;
+  if(!bildUrl[k]){
+    const daten = welches === 'voll' ? e.daten : e.vorschau;
+    if(!daten) return '';
+    bildUrl[k] = URL.createObjectURL(new Blob([daten], {type: welches === 'voll' ? (e.typ || 'image/jpeg') : 'image/jpeg'}));
+  }
+  return bildUrl[k];
+}
+function alsDatei(e){ return new File([e.daten], e.dateiname || (e.name + '.jpg'), {type: e.typ || 'image/jpeg'}); }
+
+async function sammlungZeigen(){
+  try{ sammlung = await sammlungAlle(); }
+  catch(err){ document.getElementById('sammlungInfo').textContent = 'Speicher nicht erreichbar: ' + err.message; return; }
+  const ziel = document.getElementById('kacheln');
+  ziel.innerHTML = '';
+  sammlung.forEach(function(e){
+    const k = document.createElement('div');
+    k.className = 'kachel' + (e.gewaehlt ? ' an' : '');
+    const img = document.createElement('img'); img.src = urlFuer(e, 'klein'); img.alt = e.name;
+    img.addEventListener('click', () => vollOeffnen(e.id));
+    const n = document.createElement('div'); n.className = 'kname'; n.textContent = e.name;
+    const h = document.createElement('div'); h.className = 'haken'; h.textContent = '✓';
+    h.addEventListener('click', async function(ev){
+      ev.stopPropagation(); e.gewaehlt = !e.gewaehlt; await sammlungSchreiben(e); sammlungZeigen();
+    });
+    k.appendChild(img); k.appendChild(n); k.appendChild(h);
+    ziel.appendChild(k);
+  });
+  const gew = sammlung.filter(e => e.gewaehlt).length;
+  document.getElementById('sammlungTeilen').disabled = !gew;
+  if(!stapelLaeuft) document.getElementById('stapelLos').disabled = !gew;
+  document.getElementById('sammlungAlle').textContent = (gew === sammlung.length && gew) ? 'Keine auswählen' : 'Alle auswählen';
+  let belegt = '';
+  try{
+    if(navigator.storage && navigator.storage.estimate){
+      const est = await navigator.storage.estimate();
+      belegt = ', rund ' + Math.round((est.usage || 0)/1048576) + ' MB belegt';
+    }
+  }catch(e){}
+  document.getElementById('sammlungInfo').textContent = sammlung.length
+    ? sammlung.length + ' Bild(er), ' + gew + ' ausgewählt' + belegt + '. Häkchen antippen wählt aus, das Bild antippen öffnet die Vollansicht.'
+    : 'Noch keine Bilder. Sie bleiben im Gerät gespeichert, auch wenn die Seite neu geladen wird.';
+}
+
+document.getElementById('sammlungDatei').addEventListener('change', async function(ev){
+  const dateien = Array.from(ev.target.files || []);
+  ev.target.value = '';
+  if(!dateien.length) return;
+  try{ if(navigator.storage && navigator.storage.persist) await navigator.storage.persist(); }catch(e){}
+  let reihe = sammlung.reduce((m, e) => Math.max(m, e.reihe || 0), 0);
+  for(const d of dateien){
+    document.getElementById('sammlungInfo').textContent = 'Nehme auf: ' + (d.name || 'Bild') + ' …';
+    try{
+      const v = await vorschauMachen(d);
+      const name = (d.name || 'Bild').replace(/\.[^.]+$/, '');
+      await sammlungSchreiben({id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+        name, dateiname: d.name || (name + '.jpg'), typ: d.type || 'image/jpeg', groesse: d.size,
+        datum: new Date().toISOString(), reihe: ++reihe, gewaehlt: false,
+        breite: v.breite, hoehe: v.hoehe, vorschau: v.vorschau, daten: await d.arrayBuffer()});
+    }catch(err){
+      alert('„' + (d.name || 'Bild') + '" ließ sich nicht aufnehmen: ' + err.message);
+    }
+  }
+  sammlungZeigen();
+});
+
+document.getElementById('sammlungAlle').addEventListener('click', async function(){
+  const alleAn = sammlung.length && sammlung.every(e => e.gewaehlt);
+  for(const e of sammlung){ e.gewaehlt = !alleAn; await sammlungSchreiben(e); }
+  sammlungZeigen();
+});
+
+async function dateienTeilen(dateien){
+  if(navigator.canShare && navigator.share && navigator.canShare({files: dateien})){
+    try{ await navigator.share({files: dateien}); }
+    catch(err){ if(err && err.name !== 'AbortError') alert('Teilen ging nicht: ' + err.message); }
+    return;
+  }
+  dateien.forEach(function(d){
+    const a = document.createElement('a'); a.href = URL.createObjectURL(d); a.download = d.name;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  });
+}
+document.getElementById('sammlungTeilen').addEventListener('click', function(){
+  dateienTeilen(sammlung.filter(e => e.gewaehlt).map(alsDatei));
+});
+
+/* Vollansicht: einpassen oder Originalgröße, in der Originalgröße wird mit
+   dem Finger verschoben. Antippen des Bildes wechselt ebenfalls. */
+let vollId = null;
+function vollOeffnen(id){
+  const e = sammlung.find(x => x.id === id); if(!e) return;
+  vollId = id;
+  const box = document.getElementById('vollBild');
+  box.classList.remove('eins');
+  document.getElementById('vollImg').src = urlFuer(e, 'voll');
+  document.getElementById('vollName').textContent = e.name + ' · ' + e.breite + ' × ' + e.hoehe + ' · ' +
+    Math.round((e.groesse || 0)/1024) + ' KB · ' + (e.dateiname || '');
+  document.getElementById('vollGroesse').textContent = 'Originalgröße';
+  document.getElementById('voll').classList.add('an');
+}
+function vollGroesseWechseln(ev){
+  const box = document.getElementById('vollBild'), img = document.getElementById('vollImg');
+  const eins = !box.classList.contains('eins');
+  let fx = 0.5, fy = 0.5;
+  if(ev && ev.target === img && ev.offsetX !== undefined && img.clientWidth){ fx = ev.offsetX/img.clientWidth; fy = ev.offsetY/img.clientHeight; }
+  box.classList.toggle('eins', eins);
+  document.getElementById('vollGroesse').textContent = eins ? 'Einpassen' : 'Originalgröße';
+  if(eins) requestAnimationFrame(function(){
+    box.scrollLeft = Math.max(0, img.naturalWidth*fx - box.clientWidth/2);
+    box.scrollTop = Math.max(0, img.naturalHeight*fy - box.clientHeight/2);
+  });
+}
+document.getElementById('vollImg').addEventListener('click', vollGroesseWechseln);
+document.getElementById('vollGroesse').addEventListener('click', () => vollGroesseWechseln(null));
+document.getElementById('vollZu').addEventListener('click', function(){
+  document.getElementById('voll').classList.remove('an'); vollId = null;
+});
+document.getElementById('vollUmbenennen').addEventListener('click', async function(){
+  const e = sammlung.find(x => x.id === vollId); if(!e) return;
+  const neu = prompt('Name für dieses Bild', e.name);
+  if(neu === null || !neu.trim()) return;
+  e.name = neu.trim(); await sammlungSchreiben(e);
+  document.getElementById('vollName').textContent = e.name + ' · ' + e.breite + ' × ' + e.hoehe + ' · ' +
+    Math.round((e.groesse || 0)/1024) + ' KB · ' + (e.dateiname || '');
+  sammlungZeigen();
+});
+document.getElementById('vollTeilen').addEventListener('click', function(){
+  const e = sammlung.find(x => x.id === vollId); if(e) dateienTeilen([alsDatei(e)]);
+});
+document.getElementById('vollLoeschen').addEventListener('click', async function(){
+  const e = sammlung.find(x => x.id === vollId); if(!e) return;
+  if(!confirm('„' + e.name + '" aus der Sammlung löschen?')) return;
+  await sammlungEntfernen(e.id);
+  ['klein', 'voll'].forEach(w => { const k = e.id + ':' + w; if(bildUrl[k]){ URL.revokeObjectURL(bildUrl[k]); delete bildUrl[k]; } });
+  document.getElementById('voll').classList.remove('an'); vollId = null;
+  sammlungZeigen();
+});
+document.getElementById('vollLesen').addEventListener('click', async function(){
+  const e = sammlung.find(x => x.id === vollId); if(!e) return;
+  if(!dienst){ alert('Erst oben die Engine laden.'); return; }
+  document.getElementById('voll').classList.remove('an'); vollId = null;
+  document.getElementById('fotokarte').scrollIntoView({behavior:'smooth'});
+  await bildAnnehmen(alsDatei(e), e.dateiname);
+});
+
+
+/* ==================== Durchlauf und Ergebnisse (v0.25) ====================
+
+   Die ausgewählten Bilder laufen nacheinander durch den gewohnten Ablauf.
+   Je Blatt wird festgehalten, was "Alles kopieren" liefern würde, dazu statt
+   der Ernte-Datei eine knappe Zellenliste: eine Zeile je Zelle mit Zeile,
+   Spalte, Text, Sicherheit, Höhe, waagerechter Lage und Rest - alles, was die
+   Auswertung aus der Ernte braucht, bei einem Bruchteil der Länge.
+   "Ergebnisse kopieren" legt alles in einem Block ab, die Umgebung nur
+   einmal oben. */
+let stapel = [], stapelLaeuft = false;
+
+function zellenKurz(e){
+  if(!e || !e.zellen) return '(keine Ernte – es wurden keine Spalten gefunden)';
+  const sp = (e.spalten || []).map(x => x.lage + '=' + x.rolle + ' ' +
+    (x.von === null || x.von === undefined ? '?' : Math.round(x.von)) + '–' + (isFinite(x.bis) ? Math.round(x.bis) : '∞') +
+    (x.versatz ? ' Versatz ' + x.versatz : '') + (x.drift ? ' Drift ' + x.drift : ''));
+  const z = e.zellen.map(c => [c.zeile === null ? '–' : c.zeile, c.spalte, c.roh, c.sicherheit, Math.round(c.y),
+                               Math.round(c.x0) + '–' + Math.round(c.x1), c.rest].join(' | ') +
+                              (c.vorher !== undefined ? ' | vorher „' + c.vorher + '"' : ''));
+  return 'Bild ' + e.quelle.breite + ' × ' + e.quelle.hoehe + ' · Spalten: ' + sp.join(', ') + '\n' +
+         'Zeile | Spalte | Text | Sicherheit | y | x | Rest\n' + z.join('\n');
+}
+
+function stapelZeigen(){
+  const ziel = document.getElementById('stapelListe');
+  ziel.innerHTML = '';
+  stapel.forEach(function(r){
+    const d = document.createElement('div');
+    d.className = 'stapelzeile';
+    d.textContent = r.name;
+    const k = document.createElement('small');
+    k.textContent = r.kurz;
+    d.appendChild(k);
+    d.addEventListener('click', async function(){
+      const e = sammlung.find(x => x.id === r.id);
+      if(!e || !dienst || stapelLaeuft) return;
+      document.getElementById('fotokarte').scrollIntoView({behavior:'smooth'});
+      await bildAnnehmen(alsDatei(e), e.dateiname);
+    });
+    ziel.appendChild(d);
+  });
+  document.getElementById('stapelKopieren').disabled = !stapel.length || stapelLaeuft;
+}
+
+document.getElementById('stapelLos').addEventListener('click', async function(){
+  const auswahl = sammlung.filter(e => e.gewaehlt);
+  if(!auswahl.length) return;
+  if(!dienst){ alert('Erst oben die Engine laden.'); return; }
+  stapelLaeuft = true; stapel = [];
+  this.disabled = true;
+  stapelZeigen();
+  for(let i = 0; i < auswahl.length; i++){
+    const e = auswahl[i];
+    this.textContent = 'Läuft: ' + (i+1) + ' von ' + auswahl.length + ' – ' + e.name;
+    const t0 = jetzt();
+    let gut = false;
+    try{ gut = await bildAnnehmen(alsDatei(e), e.dateiname); }catch(err){ gut = false; }
+    const dauer = (jetzt() - t0)/1000;
+    const ernte = letzteErnte;
+    const zeilen = ernte && ernte.zellen ? new Set(ernte.zellen.filter(c => c.zeile !== null).map(c => c.zeile)).size : 0;
+    const weg = letzteEntzerrung ? (letzteEntzerrung.art === 'textzeilen' ? 'entzerrt' : 'gedreht') : '';
+    const text = letzteAusgabe.startsWith(umgebungText) ? letzteAusgabe.slice(umgebungText.length).trim() : letzteAusgabe;
+    stapel.push({id: e.id, name: e.name, dateiname: e.dateiname,
+      kurz: gut ? zeilen + ' Zeilen · ' + weg + ' · ' + dauer.toFixed(1).replace('.', ',') + ' s' +
+                  (letzterNummernBericht ? ' · Nummernspalte eigens gelesen' : '')
+                : 'nicht gelesen',
+      text: gut ? text : '(nicht gelesen)', zellen: gut ? zellenKurz(ernte) : ''});
+    stapelZeigen();
+  }
+  stapelLaeuft = false;
+  this.textContent = 'Ausgewählte durchlaufen';
+  this.disabled = !sammlung.some(e => e.gewaehlt);
+  stapelZeigen();
+});
+
+document.getElementById('stapelKopieren').addEventListener('click', function(){
+  if(!stapel.length) return;
+  const teile = [umgebungText, 'Durchlauf mit ' + stapel.length + ' Blatt/Blättern: ' + stapel.map(r => r.name).join(', ')];
+  stapel.forEach(function(r){
+    teile.push('\n\n=================== ' + r.name + ' (' + r.dateiname + ') ===================\n' +
+               r.text + '\n\n--- Zellen ---\n' + r.zellen);
+  });
+  const knopf = this;
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(teile.join('\n')).then(function(){
+      knopf.textContent = 'Kopiert';
+      setTimeout(() => { knopf.textContent = 'Ergebnisse kopieren'; }, 1600);
+    }, function(err){ alert('Kopieren ging nicht: ' + err.message); });
+  }
+});
+
+sammlungZeigen();
 </script>
 </body>
 </html>
