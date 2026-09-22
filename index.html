@@ -1,7 +1,17 @@
 <!DOCTYPE html>
 <!--
   PaddleOCR-Test · Verteilerbeschreibung
-  v0.27 · 22.09.2026
+  v0.28 · 22.09.2026
+
+  v0.28: Abgleich mit der Musterloesung. In der Vollansicht jedes Bildes der
+  Knopf "Musterloesung" (eine Zeile je Eintrag, Nr | Bezeichnung | Ort
+  [| Absicherung], wird mit dem Bild gespeichert, die Kachel zeigt "mit
+  Muster"). Nach jedem Lauf aus der Sammlung: Kasten ueber der Tabelle mit
+  "x von y Zeilen richtig" und nur den Abweichungen, derselbe Abschnitt oben
+  im kopierten Bericht, die Zaehlung auch in der Ergebnisliste. Streng
+  verglichen, nur Leerzeichen zaehlen nicht; Soll ist, was SAM in den
+  E-Assistenten eintragen soll (Jeans Festlegung). Die Deutung selbst ist
+  noch NICHT aufs Schema umgestellt - das ist v0.29.
 
   v0.27: der eigentliche Grund, warum die Nummernspalte auf dem Muench-Blatt
   nie gelesen wurde - verarbeite() legte sein Rueckgabeobjekt nach dem
@@ -605,6 +615,12 @@
 #voll .leiste button{flex:1 1 auto}
 .stapelzeile{cursor:pointer;padding:8px 10px;border:1px solid var(--linie, #ccc);border-radius:8px;margin-top:6px;font-size:14px}
 .stapelzeile small{display:block;color:#666;margin-top:2px}
+#sollBox{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.55);display:none;align-items:flex-start;justify-content:center;padding:calc(env(safe-area-inset-top,0px) + 12px) 12px 12px}
+#sollBox.an{display:flex}
+.sollInnen{background:#fff;border-radius:14px;padding:14px;width:100%;max-width:640px}
+#sollText{width:100%;box-sizing:border-box;height:52vh;font:16px/1.35 ui-monospace,Menlo,monospace;padding:8px;border:1px solid #bbb;border-radius:10px}
+pre.abgleich{background:#FFF4E0;border:1px solid #E0B060;border-radius:10px;padding:10px;white-space:pre-wrap;font-size:13px;margin:0 0 12px}
+pre.abgleich.gut{background:#EAF5DC;border-color:#8FBE36}
 </style>
 </head>
 <body>
@@ -612,7 +628,7 @@
 
   <header>
     <h1>PaddleOCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.27 · 22.09.2026</span>
+    <span class="ver">v0.28 · 22.09.2026</span>
   </header>
 
   <div class="karte">
@@ -732,12 +748,25 @@
     <pre id="umgebung"></pre>
   </div>
 
+  <div id="sollBox">
+    <div class="sollInnen">
+      <b id="sollTitel">Musterlösung</b>
+      <p class="hinweis" style="margin:4px 0 8px">Eine Zeile je Eintrag: Nr | Bezeichnung | Ort, bei Bedarf | Absicherung. „—" für leer.</p>
+      <textarea id="sollText" spellcheck="false" autocapitalize="off" autocorrect="off"></textarea>
+      <div class="knopfreihe" style="margin-top:10px">
+        <button id="sollSpeichern">Speichern</button>
+        <button class="still" id="sollAbbrechen">Abbrechen</button>
+      </div>
+    </div>
+  </div>
+
   <div id="voll">
     <div id="vollBild"><img id="vollImg" alt=""></div>
     <div class="leiste">
       <b id="vollName"></b>
       <button class="still" id="vollGroesse">Originalgröße</button>
       <button class="still" id="vollUmbenennen">Umbenennen</button>
+      <button class="still" id="vollSoll">Musterlösung</button>
       <button class="still" id="vollTeilen">Teilen</button>
       <button class="still" id="vollLesen">Lesen</button>
       <button class="still" id="vollLoeschen">Löschen</button>
@@ -770,7 +799,7 @@ const MODELLE = {
   latin: {name:'v5 lateinisch',  konstante:'V5_LATIN_MOBILE_MODEL'}
 };
 
-const VERSION = 'v0.27 · 22.09.2026';
+const VERSION = 'v0.28 · 22.09.2026';
 
 /* ==================== Schrittliste ==================== */
 
@@ -1147,6 +1176,71 @@ function entzerrenNachFluchtpunkt(canvas, vp){
 }
 
 let letzteEntzerrung = null;
+
+/* ==================== Abgleich mit der Musterlösung (v0.28) ====================
+
+   Jeans Festlegung: richtig ist, was SAM in den E-Assistenten eintragen soll.
+   Die Musterlösung hängt am Bild in der Sammlung, eine Zeile je Eintrag:
+   Nr | Bezeichnung | Ort [| Absicherung], "—" für leer. Verglichen wird
+   STRENG, nur Leerzeichen zählen nicht - es kommt jetzt genau auf Striche
+   und Kommas an. Zeilen werden über die Nummer gepaart, wobei "7/8" und
+   "7–8" dieselbe Zeile sind (die Abweichung der Schreibweise wird trotzdem
+   gemeldet). Zeilen der App, die nur eine Nummer tragen, zählen nicht
+   (Blatt 2 hat 36 davon); trägt eine Zeile Inhalt, den die Musterlösung
+   nicht kennt, ist sie "zu viel". */
+let letzteReihen = null, aktuellesSoll = null, letzterAbgleich = null;
+function sollLesen(text){
+  const zeilen = [];
+  (text || '').split(/\r?\n/).forEach(function(l){
+    l = l.trim();
+    if(!l || l.startsWith('#')) return;
+    const f = l.split('|').map(x => x.trim());
+    if(f.length < 2) return;
+    zeilen.push({nr: f[0], bez: f[1] || '', ort: f[2] || '', sich: f.length > 3 ? f[3] : null});
+  });
+  return zeilen;
+}
+function glatt(t){ t = (t || '').replace(/\s+/g, ' ').trim(); return (t === '—' || t === '-' || t === '–') ? '' : t; }
+function nrSchluessel(t){ return (t || '').replace(/\*/g, '').replace(/\s/g, '').replace(/[–—\/,.]/g, '-').replace(/-+/g, '-'); }
+function abgleichen(sollText, ist){
+  const soll = sollLesen(sollText);
+  const a = {zeilen: soll.length, richtig: 0, abw: [], fehlt: [], zuviel: []};
+  const genutzt = new Set();
+  soll.forEach(function(s){
+    const k = nrSchluessel(s.nr);
+    const i = ist.findIndex((r, j) => !genutzt.has(j) && nrSchluessel(r.nr) === k);
+    if(i < 0){ a.fehlt.push(s.nr); return; }
+    genutzt.add(i);
+    const r = ist[i];
+    let gut = true;
+    const pruef = function(name, soll1, ist1){
+      if(glatt(soll1) !== glatt(ist1)){
+        gut = false;
+        a.abw.push(s.nr + ' ' + name + ': soll „' + (glatt(soll1) || '—') + '" – ist „' + (glatt(ist1) || '—') + '"');
+      }
+    };
+    pruef('Nr', s.nr, r.nr);
+    pruef('Bezeichnung', s.bez, r.bez);
+    pruef('Ort', s.ort, r.ort);
+    if(s.sich !== null) pruef('Absicherung', s.sich, r.sich);
+    if(gut) a.richtig++;
+  });
+  ist.forEach(function(r, j){
+    if(genutzt.has(j)) return;
+    if(glatt(r.bez) || glatt(r.ort) || glatt(r.sich))
+      a.zuviel.push(r.nr + ' „' + [r.bez, r.ort, r.sich].map(glatt).filter(Boolean).join(' | ') + '"');
+  });
+  return a;
+}
+function abgleichText(a){
+  const z = ['--- Abgleich mit der Musterlösung ---',
+    a.richtig + ' von ' + a.zeilen + ' Zeilen richtig' +
+    (a.fehlt.length ? ', ' + a.fehlt.length + ' fehlen' : '') + (a.zuviel.length ? ', ' + a.zuviel.length + ' zu viel' : '')];
+  a.abw.forEach(x => z.push('   ' + x));
+  if(a.fehlt.length) z.push('   fehlt: ' + a.fehlt.join(', '));
+  a.zuviel.forEach(x => z.push('   zu viel: ' + x));
+  return z.join('\n');
+}
 let erzwungeneNummernGrenze = null;   /* v0.23: Spaltengrenze aus dem Nummernstreifen */
 let letzterNummernBericht = null;
 
@@ -2245,6 +2339,7 @@ const leinwand = document.getElementById('leinwand');
 document.getElementById('datei').addEventListener('change', async function(e){
   const datei = e.target.files && e.target.files[0];
   if(!datei || !dienst) return;
+  aktuellesSoll = null;
   await bildAnnehmen(datei, datei.name || '');
 });
 
@@ -2289,6 +2384,8 @@ document.getElementById('nochmal').addEventListener('click', lauf);
 async function lauf(){
   if(!quelle || !dienst) return;
   letzteErnte = null;
+  letzteReihen = null;
+  letzterAbgleich = null;
   document.getElementById('nochmal').disabled = true;
 
   let winkel = 0;
@@ -3003,6 +3100,7 @@ function verarbeite(erg, arbeit, winkel, leseDauer, nachleseBericht){
     const gebaut = baueTabelle(teile, nach, raster, rv.rollen, gitter, basis, warnung);
     ziel.appendChild(gebaut.knoten);
     tabellenText = gebaut.text;
+    letzteReihen = gebaut.ist || null;
     /* v0.27: ergänzen statt ersetzen - sonst fällt der gefundene Nummernstreifen
        heraus (daran scheiterten v0.23 und v0.26 auf dem Münch-Blatt) */
     rueck = Object.assign(rueck, {zweifel: gebaut.zweifel || [],
@@ -3156,7 +3254,18 @@ function verarbeite(erg, arbeit, winkel, leseDauer, nachleseBericht){
     rt.appendChild(h); rt.appendChild(pre);
   });
 
-  letzteAusgabe = umgebungText + '\n\n--- Rohtext ---\n' + roh +
+  letzterAbgleich = null;
+  let abgleichBlock = '';
+  if(aktuellesSoll && letzteReihen){
+    letzterAbgleich = abgleichen(aktuellesSoll, letzteReihen);
+    abgleichBlock = abgleichText(letzterAbgleich);
+    const box = document.createElement('pre');
+    box.className = 'abgleich' + (letzterAbgleich.richtig === letzterAbgleich.zeilen &&
+                                  !letzterAbgleich.zuviel.length ? ' gut' : '');
+    box.textContent = abgleichBlock.replace('--- Abgleich mit der Musterlösung ---\n', '');
+    ziel.insertBefore(box, ziel.firstChild);
+  }
+  letzteAusgabe = umgebungText + (abgleichBlock ? '\n\n' + abgleichBlock : '') + '\n\n--- Rohtext ---\n' + roh +
                   '\n\n--- Tabelle ---\n' + tabellenText.trim() +
                   '\n\n--- Messwerte, Raster und Ernte ---\n' + messText + '\n\n' + kz;
 
@@ -4008,7 +4117,10 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
     huelle.appendChild(h); huelle.appendChild(ul);
     text += 'Keiner Nummer zugeordnet: ' + rest.join('; ') + '\n';
   }
-  return {knoten: huelle, text, zuB, zuO, zweifel};
+  /* v0.28: die fertigen Zeilen für den Abgleich mit der Musterlösung */
+  const ist = reihen.map(r => ({nr: r.n.text || '', bez: r.bez.leer ? '' : r.bez.text,
+    ort: (r.ort && !r.ort.leer) ? r.ort.text : '', sich: (r.sich && !r.sich.leer) ? r.sich.text : ''}));
+  return {knoten: huelle, text, zuB, zuO, zweifel, ist};
 }
 
 /* Farbe nach Herkunft: gruen korrigiert, bernstein uebernommen ohne
@@ -4253,7 +4365,7 @@ async function sammlungZeigen(){
     k.className = 'kachel' + (e.gewaehlt ? ' an' : '');
     const img = document.createElement('img'); img.src = urlFuer(e, 'klein'); img.alt = e.name;
     img.addEventListener('click', () => vollOeffnen(e.id));
-    const n = document.createElement('div'); n.className = 'kname'; n.textContent = e.name;
+    const n = document.createElement('div'); n.className = 'kname'; n.textContent = e.name + (e.soll ? ' · mit Muster' : '');
     const h = document.createElement('div'); h.className = 'haken'; h.textContent = '✓';
     h.addEventListener('click', async function(ev){
       ev.stopPropagation(); e.gewaehlt = !e.gewaehlt; await sammlungSchreiben(e); sammlungZeigen();
@@ -4376,6 +4488,7 @@ document.getElementById('vollLesen').addEventListener('click', async function(){
   if(!dienst){ alert('Erst oben die Engine laden.'); return; }
   document.getElementById('voll').classList.remove('an'); vollId = null;
   document.getElementById('fotokarte').scrollIntoView({behavior:'smooth'});
+  aktuellesSoll = e.soll || null;
   await bildAnnehmen(alsDatei(e), e.dateiname);
 });
 
@@ -4417,6 +4530,7 @@ function stapelZeigen(){
       const e = sammlung.find(x => x.id === r.id);
       if(!e || !dienst || stapelLaeuft) return;
       document.getElementById('fotokarte').scrollIntoView({behavior:'smooth'});
+      aktuellesSoll = e.soll || null;
       await bildAnnehmen(alsDatei(e), e.dateiname);
     });
     ziel.appendChild(d);
@@ -4436,6 +4550,7 @@ document.getElementById('stapelLos').addEventListener('click', async function(){
     this.textContent = 'Läuft: ' + (i+1) + ' von ' + auswahl.length + ' – ' + e.name;
     const t0 = jetzt();
     let gut = false;
+    aktuellesSoll = e.soll || null;
     try{ gut = await bildAnnehmen(alsDatei(e), e.dateiname); }catch(err){ gut = false; }
     const dauer = (jetzt() - t0)/1000;
     const ernte = letzteErnte;
@@ -4443,7 +4558,8 @@ document.getElementById('stapelLos').addEventListener('click', async function(){
     const weg = letzteEntzerrung ? (letzteEntzerrung.art === 'textzeilen' ? 'entzerrt' : 'gedreht') : '';
     const text = letzteAusgabe.startsWith(umgebungText) ? letzteAusgabe.slice(umgebungText.length).trim() : letzteAusgabe;
     stapel.push({id: e.id, name: e.name, dateiname: e.dateiname,
-      kurz: gut ? zeilen + ' Zeilen · ' + weg + ' · ' + dauer.toFixed(1).replace('.', ',') + ' s' +
+      kurz: gut ? (letzterAbgleich ? letzterAbgleich.richtig + ' von ' + letzterAbgleich.zeilen + ' richtig · ' : '') +
+                  zeilen + ' Zeilen · ' + weg + ' · ' + dauer.toFixed(1).replace('.', ',') + ' s' +
                   (letzterNummernBericht ? ' · Nummernspalte eigens gelesen' : '')
                 : 'nicht gelesen',
       text: gut ? text : '(nicht gelesen)', zellen: gut ? zellenKurz(ernte) : ''});
@@ -4457,7 +4573,8 @@ document.getElementById('stapelLos').addEventListener('click', async function(){
 
 document.getElementById('stapelKopieren').addEventListener('click', function(){
   if(!stapel.length) return;
-  const teile = [umgebungText, 'Durchlauf mit ' + stapel.length + ' Blatt/Blättern: ' + stapel.map(r => r.name).join(', ')];
+  const teile = [umgebungText, 'Durchlauf mit ' + stapel.length + ' Blatt/Blättern: ' +
+                 stapel.map(r => r.name + (r.kurz.indexOf(' von ') > 0 ? ' (' + r.kurz.split(' · ')[0] + ')' : '')).join(', ')];
   stapel.forEach(function(r){
     teile.push('\n\n=================== ' + r.name + ' (' + r.dateiname + ') ===================\n' +
                r.text + '\n\n--- Zellen ---\n' + r.zellen);
@@ -4469,6 +4586,26 @@ document.getElementById('stapelKopieren').addEventListener('click', function(){
       setTimeout(() => { knopf.textContent = 'Ergebnisse kopieren'; }, 1600);
     }, function(err){ alert('Kopieren ging nicht: ' + err.message); });
   }
+});
+
+
+document.getElementById('vollSoll').addEventListener('click', function(){
+  const e = sammlung.find(x => x.id === vollId); if(!e) return;
+  document.getElementById('sollTitel').textContent = 'Musterlösung – ' + e.name;
+  document.getElementById('sollText').value = e.soll || '';
+  document.getElementById('sollBox').classList.add('an');
+});
+document.getElementById('sollAbbrechen').addEventListener('click', function(){
+  document.getElementById('sollBox').classList.remove('an');
+});
+document.getElementById('sollSpeichern').addEventListener('click', async function(){
+  const e = sammlung.find(x => x.id === vollId);
+  if(e){
+    e.soll = document.getElementById('sollText').value.trim();
+    await sammlungSchreiben(e);
+    sammlungZeigen();
+  }
+  document.getElementById('sollBox').classList.remove('an');
 });
 
 sammlungZeigen();
