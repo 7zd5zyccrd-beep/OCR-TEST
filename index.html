@@ -1,7 +1,19 @@
 <!DOCTYPE html>
 <!--
   PaddleOCR-Test · Verteilerbeschreibung
-  v0.28 · 22.09.2026
+  v0.29 · 22.09.2026
+
+  v0.29: Deutung aufs Schema des E-Assistenten (Jeans Festlegungen). Neue
+  letzte Stufe aufsSchema() vor der Ausgabe: Kreisnummern mit Gedankenstrich,
+  Bezeichnungspaare mit Komma, Steckdosen-Kuerzel einheitlich "SD", sonst
+  ausschreiben, Licht und Arbeitsplatte bleiben, Elektroherd -> E-Herd,
+  Ueberspannungsschutz -> Ueberspannungsableiter, Geschirrspueler ->
+  Steckdose Geschirrspueler, E-Herd und Geschirrspueler ohne Ort -> Kueche,
+  Nicht-Raeume aus der Ortsspalte zur Bezeichnung (Muench: "Kueche links"
+  -> Steckdosen links / Kueche), FI-Beschreibung woertlich (nur Kreisnummern
+  darin mit Gedankenstrich). Muench jetzt mit Nummernspalte (23 Nummern,
+  alle sechs Klammern erkannt); die Klammern werden noch NICHT zu einem
+  Eintrag zusammengefasst - Vorschlag fuer v0.30.
 
   v0.28: Abgleich mit der Musterloesung. In der Vollansicht jedes Bildes der
   Knopf "Musterloesung" (eine Zeile je Eintrag, Nr | Bezeichnung | Ort
@@ -628,7 +640,7 @@ pre.abgleich.gut{background:#EAF5DC;border-color:#8FBE36}
 
   <header>
     <h1>PaddleOCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.28 · 22.09.2026</span>
+    <span class="ver">v0.29 · 22.09.2026</span>
   </header>
 
   <div class="karte">
@@ -786,7 +798,7 @@ const BEZEICHNUNGEN = ['Licht','Steckdose','Steckdosen','Beleuchtung','E-Herd','
   'Fehlerstromschutzschalter','FI-Schutzschalter','FI/LS','Überspannungsschutz',
   'Überspannungsableiter','Hauptschalter',
   'Stromstoßschalter','Trafo','CEE-Steckdose','Klingel','Durchlauferhitzer','Warmwasser',
-  'Boiler','Heizung','Rollladen','Arbeitsfläche','Außensteckdose','Reserve','Zuleitung','Garage',
+  'Boiler','Heizung','Rollladen','Arbeitsfläche','Arbeitsplatte','SD','Außensteckdose','Reserve','Zuleitung','Garage',
   'Relais'];
 
 const ORTE = ['Bad','Badezimmer','Küche','Flur','Diele','Wohnzimmer','Schlafzimmer','Kinderzimmer',
@@ -799,7 +811,7 @@ const MODELLE = {
   latin: {name:'v5 lateinisch',  konstante:'V5_LATIN_MOBILE_MODEL'}
 };
 
-const VERSION = 'v0.28 · 22.09.2026';
+const VERSION = 'v0.29 · 22.09.2026';
 
 /* ==================== Schrittliste ==================== */
 
@@ -3514,7 +3526,9 @@ function ernteDateiname(){
    Schreiber. Wird vor jedem Listenvergleich angewandt. */
 const ABKUERZUNGEN = {
   'bel':'Beleuchtung','licht':'Licht','lt':'Licht',
-  'std':'Steckdosen','sd':'Steckdosen','stdo':'Steckdosen','dose':'Steckdose',
+  /* v0.29 (Jean): Steckdose/Steckdosen-Kürzel bleiben gekürzt, einheitlich "SD" -
+     aus ihnen lässt sich Einzahl oder Mehrzahl nicht ablesen */
+  'std':'SD','sd':'SD','stdo':'SD','stckd':'SD','stkd':'SD','steckd':'SD','dose':'Steckdose',
   'cee':'CEE-Steckdose','gs':'Geschirrspüler','gsp':'Geschirrspüler',
   'wm':'Waschmaschine','wama':'Waschmaschine','tr':'Trockner','trk':'Trockner',
   'af':'Arbeitsfläche','li':'links','re':'rechts',
@@ -3523,7 +3537,7 @@ const ABKUERZUNGEN = {
   'hwr':'Hauswirtschaftsraum','bn':'Balkon','bk':'Balkon','kel':'Keller',
   'kam':'Kammer','whg':'Wohnung','fi':'FI-Schutzschalter','rcd':'FI-Schutzschalter',
   'üs':'Überspannungsableiter','ueberspannung':'Überspannungsableiter',
-  'elektroherd':'E-Herd','arbeitsplatte':'Arbeitsfläche'
+  'elektroherd':'E-Herd'
 };
 
 /* Nennströme, die der E-Assistent im Auswahlfeld anbietet. Alles andere
@@ -3760,6 +3774,66 @@ function rollenVerteilen(teile){
 }
 
 /* ==================== Tabelle bauen ==================== */
+
+/* ==================== Aufs Schema des E-Assistenten (v0.29) ====================
+
+   Letzte Stufe vor der Ausgabe, nach Jeans Festlegungen (22.09.2026): richtig
+   ist, was SAM in den E-Assistenten eintragen soll.
+   - Kreisnummern: Bereiche mit Gedankenstrich ohne Leerzeichen, 7/8 -> 7–8,
+     13 -15 -> 13–15, auch Kommas und Schrägstriche.
+   - Bezeichnung: Paare mit Komma wie in der Paarlogik ("Licht, Steckdosen");
+     Abkürzungen ausschreiben, nur Steckdose/Steckdosen bleiben als "SD";
+     Licht bleibt Licht, Arbeitsplatte bleibt Arbeitsplatte, Elektroherd wird
+     E-Herd, Überspannungsschutz wird Überspannungsableiter, Geschirrspüler
+     wird "Steckdose Geschirrspüler".
+   - Ort: Räume mit Komma, Bad wird Badezimmer; E-Herd und Geschirrspüler
+     bekommen ohne eigenen Ort die Küche. Was in der Ortsspalte steht, aber
+     kein Raum ist (Geschirrspüler, links, rechts), gehört zur Bezeichnung -
+     auf dem Münch-Blatt steht es in der rechten Spalte.
+   - FI: die Beschreibung bleibt wörtlich, nur Kreisnummern darin werden wie
+     oben geschrieben ("Stromkreis 5/ 6" -> "Stromkreis 5–6");
+     "Fehlerstromschutzschalter" bleibt ausgeschrieben. */
+function kreisStriche(t){
+  return (t || '').replace(/(\d)\s*[\/,\-–—.]+\s*(\d)/g, '$1–$2');
+}
+function istRaum(w){
+  const l = (w || '').toLowerCase();
+  return l && ORTE.some(x => x.toLowerCase() === l);
+}
+function aufsSchema(r){
+  const setze = function(f, text){
+    if(!f) return;
+    const alt = f.text || '';
+    f.text = text; f.leer = !text;
+    if(text && text !== alt && f.herkunft !== 'leer') f.herkunft = 'korrigiert';
+    if(text && f.herkunft === 'leer') f.herkunft = 'korrigiert';
+  };
+  if(r.n && r.n.text) r.n.text = kreisStriche(r.n.text).replace(/\s+/g, '');
+  const bez = (r.bez && !r.bez.leer) ? r.bez.text : '';
+  const sich = (r.sich && !r.sich.leer) ? r.sich.text : '';
+  const istFI = /fehlerstrom|schutzschalter/i.test(bez) || /^FI\b/.test(sich);
+  if(istFI){
+    if(!/fehlerstrom/i.test(bez)) setze(r.bez, 'FI-Schutzschalter');
+    if(r.ort){
+      const roh = (r.ort.roh || r.ort.text || '').replace(/\s+/g, ' ').trim();
+      setze(r.ort, roh ? kreisStriche(roh) : '');
+    }
+    return;
+  }
+  /* Ortsspalte: Räume bleiben, alles andere wandert zur Bezeichnung */
+  let b = bez, raeume = [];
+  if(r.ort && !r.ort.leer){
+    const rest = [];
+    r.ort.text.split(/[,\s]+/).filter(Boolean).forEach(w => (istRaum(w) ? raeume : rest).push(w));
+    if(rest.length) b = (b ? b + ' ' : '') + rest.join(' ');
+  }
+  b = b.replace(/\s*\/\s*/g, ', ').replace(/\s+/g, ' ').trim();
+  b = b.replace(/Überspannungsschutz/g, 'Überspannungsableiter');
+  if(/^Geschirrspüler\b/.test(b)) b = 'Steckdose ' + b;
+  if(b !== bez) setze(r.bez, b);
+  if(r.ort && (raeume.length || !r.ort.leer)) setze(r.ort, raeume.join(', '));
+  if(r.ort && r.ort.leer && (/^E-Herd\b/.test(b) || /^Steckdose Geschirrspüler\b/.test(b))) setze(r.ort, 'Küche');
+}
 
 function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
   const nr = teile[0].zeilen;
@@ -4026,6 +4100,8 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
   tab.innerHTML = kopf + '</tr></thead>';
   const koerper = document.createElement('tbody');
   const breite = 2 + (zeigeOrt?1:0) + (zeigeSich?1:0);
+
+  reihen.forEach(aufsSchema);
 
   reihen.forEach(function(r, idx){
     if(r.luecke > 0){
