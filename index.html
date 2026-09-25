@@ -1,7 +1,15 @@
 <!DOCTYPE html>
 <!--
   PaddleOCR-Test · Verteilerbeschreibung
-  v0.40 · 25.09.2026
+  v0.41 · 25.09.2026
+
+  v0.41: Fehlerbehebungen aus dem iPhone-Durchlauf mit v0.40 (155 von 162).
+  Eine Zeile mit eigener Bezeichnung zwischen zwei Nummern, zwischen denen
+  genau eine fehlt, bekommt diese als abgeleitete (Hofmann 44 ... 46,
+  "Relais Küche"). "Q1 FI-Schalter" als ein Wort in der Nummernspalte: Q1
+  wird die Nummer, der Rest geht zum Inhalt (Wohnungsverteiler). Ein in zwei
+  Stücke zerfallener Raum wird zusammengesetzt ("K iche"). Die FI-Beschrei-
+  bung wird geglättet: "fir" -> "für", Leerzeichen nach dem Komma.
 
   v0.40: Fehlerbehebungen aus dem iPhone-Durchlauf mit v0.38 (153 von 164).
   Die Nachlese nimmt keine Lesung, die nur noch die Hälfte der Buchstaben hat
@@ -766,7 +774,7 @@ pre.abgleich.gut{background:#EAF5DC;border-color:#8FBE36}
 
   <header>
     <h1>PaddleOCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.40 · 25.09.2026</span>
+    <span class="ver">v0.41 · 25.09.2026</span>
   </header>
 
   <div class="karte">
@@ -940,7 +948,7 @@ const MODELLE = {
   latin: {name:'v5 lateinisch',  konstante:'V5_LATIN_MOBILE_MODEL'}
 };
 
-const VERSION = 'v0.40 · 25.09.2026';
+const VERSION = 'v0.41 · 25.09.2026';
 
 /* ==================== Schrittliste ==================== */
 
@@ -4910,7 +4918,8 @@ function aufsSchema(r){
     /* "f.r": auch verlesen, "fir" (iPhone, 4-Raum-Wohnung) */
     const hinter = !sk && !fiImOrt && /^\s*(?:Fehlerstromschutzschalter|F[Il1]\s*[-‐‑–]?\s*Schutzschalter|FI|RC[DB])\s+(f[a-zäöü]r\s.+)$/i.exec(saeubern((r.bez && r.bez.roh) || bez));
     if(hinter && (!r.ort || r.ort.leer)){
-      const t = kreisStriche(hinter[1]).replace(/\s+/g, ' ').trim();
+      /* "fir" ist verlesen, "Beleuchtung,Steckdosen" ohne Leerzeichen */
+      const t = kreisStriche(hinter[1].replace(/^f[a-zäöü]r\b/, 'für').replace(/,(?=\S)/g, ', ')).replace(/\s+/g, ' ').trim();
       if(r.ort){ setze(r.ort, t); r.ort.roh = t; } else r.ort = {text: t, herkunft: 'korrigiert', leer: false, unklar: false, roh: t};
       if(/^\s*Fehlerstromschutzschalter/i.test(bez)) setze(r.bez, 'Fehlerstromschutzschalter');
     }
@@ -4945,7 +4954,16 @@ function aufsSchema(r){
     /* v0.35: nummerierte Räume bleiben zusammen ("Kinderzimmer 2"); "Kind 2" ->
        "Kinderzimmer 2", "Kinderzimmer 1 und 2" -> "Kinderzimmer 1, Kinderzimmer 2" */
     const ortRoh = nummerierteRaeume(r.ort.text);
-    ortRoh.split(/[,+ \t]+/).filter(w => w && w !== 'und').forEach(function(w){
+    /* v0.41: ein zerfallenes Wort wieder zusammensetzen, wenn es dann ein Raum
+       ist - "Bad + K iche" (Wohnungsverteiler auf dem iPhone) */
+    const stuecke = ortRoh.split(/[,+ \t]+/).filter(w => w && w !== 'und');
+    for(let k = 0; k + 1 < stuecke.length; k++){
+      const a = stuecke[k], b = stuecke[k+1];
+      if(istRaum(a) || istRaum(b) || (a + b).length < 4) continue;
+      const d = teilDeuten(a + b, ORTE);
+      if(d && istRaum(d.text)){ stuecke.splice(k, 2, a + b); }
+    }
+    stuecke.forEach(function(w){
       if(!istRaum(w)){
         /* v0.33: nahe Treffer auf der Ortsliste zählen als Raum ("Kiche") */
         const d = w.length >= 4 ? teilDeuten(w, ORTE) : null;
@@ -5059,7 +5077,7 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
      entscheidet die Nummernfolge, was eine Zeile ist, und eine Zeile ohne
      Nummer ist keine eigene. Mit Linienraster ist sie eine echte Tabellenzeile,
      deren Nummer nicht gelesen wurde (Blatt 2, Zeilen 45 bis 48). */
-  const fortsetzung = {1:{}, 2:{}};
+  const fortsetzung = {1:{}, 2:{}}, eigeneZeilen = [];
   if(!gitter && raster){
     [1,2].forEach(function(i){
       const zz = zuord[i];
@@ -5077,7 +5095,21 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
            die Nummer 45, und "Relais Küche" hing an "Relais Wohnzimmer".
            Fortsetzungen sind Orte ("Flur, Kammer", Schmidtgen & Mieth). */
         const erstes = saeubern(teile[i].zeilen[j].text).split(/[\s,\/]+/)[0] || '';
-        if(erstes.length >= 3 && !istOrtsteil(erstes) && teilDeuten(erstes, BEZEICHNUNGEN)) return;
+        if(erstes.length >= 3 && !istOrtsteil(erstes) && teilDeuten(erstes, BEZEICHNUNGEN)){
+          /* v0.41: liegt sie zwischen zwei Nummern, zwischen denen genau eine
+             fehlt (Hofmann auf dem iPhone: 44 ... 46), ist es deren Zeile - sie
+             bekommt die fehlende Nummer als abgeleitete. */
+          let naechste = -1, nK = Infinity;
+          raster.k.forEach(function(k, zi){ if(k > rz && k < nK){ nK = k; naechste = zi; } });
+          const wert = zi => { const m = zi >= 0 && nr[zi] ? /\d+/.exec(nr[zi].text) : null; return m ? +m[0] : null; };
+          const a = wert(best), b = wert(naechste);
+          if(a !== null && b !== null && b - a === 2 && zz.zu[best] >= 0){
+            eigeneZeilen.push({nach: best, i, j});
+            benutzt[i][j] = true;
+            zz.frei[j] = false;
+          }
+          return;
+        }
         if(best >= 0 && rz - bestK <= 2 && zz.zu[best] >= 0){
           (fortsetzung[i][best] = fortsetzung[i][best] || []).push(saeubern(teile[i].zeilen[j].text));
           benutzt[i][j] = true;
@@ -5087,10 +5119,23 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
     });
   }
 
+  eigeneZeilen.forEach(function(e){
+    const pos = reihenListe.findIndex(x => x.zi === e.nach);
+    if(pos >= 0) reihenListe.splice(pos + 1, 0, {r: -1, zi: -1, eigen: e});
+  });
+
   reihenListe.forEach(function(eintrag){
     const zi = eintrag.zi, r = eintrag.r;
     let n;
-    if(zi >= 0){
+    /* v0.41: "Q1 FI-Schalter" als ein Wort in der Nummernspalte (Wohnungs-
+       verteiler auf dem iPhone): Q1 ist die Nummer, der Rest gehört vor den
+       Inhalt der ersten Textspalte - dort stand er am Rechner von selbst */
+    let qRest = null;
+    const qm = zi >= 0 ? /^\s*(Q\d{1,2})\s+(\S.*)$/.exec(nr[zi].text || '') : null;
+    if(qm){
+      n = {text: qm[1], roh: qm[1], geaendert: false, unklar: false, luecke: 0, a: null, b: null, herkunft: 'gelesen'};
+      qRest = qm[2];
+    } else if(zi >= 0){
       const z = nr[zi];
       n = nach ? nummerDeuten(z.text, erwartet)
                : {text: saeubern(z.text) || '—', roh:z.text, geaendert:false, unklar:false, luecke:0, b:null};
@@ -5099,7 +5144,8 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
 
     const roh = {}, restwert = {}, quelle = {};
     [1,2].forEach(function(i){
-      const j = gitter ? spalteNachZeile[i][r] : zuord[i].zu[zi];
+      const j = eintrag.eigen ? (eintrag.eigen.i === i ? eintrag.eigen.j : undefined)
+              : gitter ? spalteNachZeile[i][r] : zuord[i].zu[zi];
       if(j === undefined || j < 0) return;
       benutzt[i][j] = true;
       quelle[rollen[i] || 'bezeichnung'] = {i, j};
@@ -5110,6 +5156,10 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
                    (!gitter && fortsetzung[i][zi] ? ' ' + fortsetzung[i][zi].join(' ') : '');
       restwert[rolle] = (zuord[i].rest && zuord[i].rest[j] !== undefined) ? zuord[i].rest[j] : 0;
     });
+    if(qRest){
+      const rolle = rollen[1] || 'bezeichnung';
+      roh[rolle] = qRest + (roh[rolle] ? ' ' + roh[rolle] : '');
+    }
     if(!n){
       /* Keine Nummer gelesen, aber das Raster sagt: hier ist eine Zeile.
          v0.33: ohne Inhalt ist es eine Leerzeile und fällt weg - auf dem
