@@ -1,7 +1,38 @@
 <!DOCTYPE html>
 <!--
   PaddleOCR-Test · Verteilerbeschreibung
-  v0.32 · 25.09.2026
+  v0.34 · 25.09.2026
+
+  v0.34: Wohnungsverteiler. Die Kreuzprobe der Linien mit der Nummernspalte
+  entfernt keine Linien mehr, wo die uebersprungenen Zeilen gleichmaessig
+  liegen - zwischen 8 und 9 stehen dort zwei Leerzeilen und die Zeile "Q1
+  FI-Schalter fuer Stromkreis 9 und 10"; die Probe hatte drei echte Linien
+  entfernt. Zeilen ohne Nummer und ohne Inhalt fallen weg, eine Geraete-
+  kennung vorn im Inhalt (Q1) wird die Nummer, ein FI kann auch in der
+  Ortsspalte stehen, die Beschreibung "fuer Stromkreis 9 und 10" wird
+  "Stromkreis 9-10". Spaltenrollen aus dem Inhalt auch ohne Absicherungs-
+  spalte (dort steht der Ort links), "+" trennt Orte, nahe Treffer auf der
+  Ortsliste zaehlen als Raum. Prueflauf: 82 von 83 (Seite), 81 in jeder
+  anderen Aufbereitung; offen nur Handschrift (Wohnungsverteiler 10 "+ Kueche"
+  je nach Aufbereitung, Muench 24).
+
+  v0.33: zwei neue Pruefblaetter (Wohnungsverteiler, Sicherungsbelegung
+  Elektro Juengling) und Jeans Schema-Festlegungen vom 25.09.2026.
+  Geometrie: die Schraeglage sucht mit oertlicher Tinte statt einer Otsu-
+  Schwelle fuers ganze Bild (Schatten und Blattrand drehten die
+  Sicherungsbelegung um -10 Grad). Nummernspalte: Nummer und Text als Paar
+  derselben erkannten Zeile ergeben die Spaltengrenze, wenn die Spaltensuche
+  beide in eine Spalte gelegt hat und der Nummernstreifen nicht zu lesen war;
+  im Nummernstreifen werden schraege und waagerechte Striche verfolgt und
+  ganz geloescht, gelesen wird abschnittweise. Deutung: "und" wie Schraeg-
+  strich, Herd -> E-Herd, FI mit blossem Nennstrom -> FI 25 A / 30 mA, Raum vorn
+  in der Bezeichnung -> Ort (nur Lageangaben: "SD Wand, Fenster"), Q1 als
+  Nummer, blosse Stroeme nur als echte Nennstroeme, leere Felder der
+  Zellenlesung erst ab 80 %, Folgewoerter einzeln korrigiert, Klebewoerter je
+  Teil zwischen Schraegstrichen, Buchstabenloses ueberschreibt keinen Ort.
+  Prueflauf, 6 Blaetter x 5 Aufbereitungen: 79 von 83 in jeder (v0.32: 51 von
+  53 auf den vier alten; neu: Sicherungsbelegung 19/19, Wohnungsverteiler
+  8/11, Muench 15/16).
 
   v0.32: zwei zusammengeklebte Bezeichnungen werden als Paar getrennt
   ("LichtSteckdosen" -> "Licht/Steckdosen" -> "Licht, Steckdosen"), wie zwei
@@ -673,7 +704,7 @@ pre.abgleich.gut{background:#EAF5DC;border-color:#8FBE36}
 
   <header>
     <h1>PaddleOCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.32 · 25.09.2026</span>
+    <span class="ver">v0.34 · 25.09.2026</span>
   </header>
 
   <div class="karte">
@@ -845,7 +876,7 @@ const MODELLE = {
   latin: {name:'v5 lateinisch',  konstante:'V5_LATIN_MOBILE_MODEL'}
 };
 
-const VERSION = 'v0.32 · 25.09.2026';
+const VERSION = 'v0.34 · 25.09.2026';
 
 /* ==================== Schrittliste ==================== */
 
@@ -1015,9 +1046,16 @@ function schraeglage(canvas){
   k.width = br; k.height = h;
   k.getContext('2d').drawImage(canvas, 0,0, br, h);
   const t = graustufen(k);
-  const s = otsu(t.hist, t.n);
+  /* v0.33: Tinte örtlich statt über eine Schwelle fürs ganze Bild. Auf der
+     Sicherungsbelegung von Elektro Jüngling sind Schatten, Wand und
+     Blattrand dunkler als die Schrift; mit Otsu gewannen sie die Suche, und
+     das fast gerade Blatt wurde um -10 Grad gedreht - danach legte die
+     Erkennung ihre Kästen über mehrere Zeilen ("24 23 SBeleuchung Wohoung").
+     Tinte ist, was deutlich dunkler ist als das hellste Papier in der
+     Umgebung - wie in textzeilenMessen. */
+  const papier = maxFilter(t.grau, br, h, 3);
   const bin = new Uint8Array(t.n);
-  for(let i=0;i<t.n;i++) bin[i] = t.grau[i] < s ? 1 : 0;
+  for(let i=0;i<t.n;i++) bin[i] = papier[i] - t.grau[i] > 40 ? 1 : 0;
 
   let bester = 0, besteVar = -1;
   /* v0.21: +-15 statt +-5 Grad - das Münch-Blatt meldete genau den Rand. */
@@ -1591,6 +1629,17 @@ function feldIn(linien, x, y){
    die App wenigstens, dass sie es nicht weiß.
 
    Am Dewitz-Schild: ohne Kreuzprobe 10 von 21 Feldern richtig, mit ihr 17. */
+function gleichmaessig(lin, von, bis, x){
+  const alle = [];
+  for(let k = 1; k < lin.length; k++) alle.push(linieBei(lin[k], x) - linieBei(lin[k-1], x));
+  const m = median(alle);
+  if(!(m > 0)) return false;
+  for(let k = von + 1; k <= bis && k < lin.length; k++){
+    const d = linieBei(lin[k], x) - linieBei(lin[k-1], x);
+    if(d < 0.7*m || d > 1.35*m) return false;
+  }
+  return true;
+}
 function kreuzpruefen(linien, anker){
   let lin = linien.slice();
   let ergaenzt = 0, entfernt = 0;
@@ -1604,7 +1653,15 @@ function kreuzpruefen(linien, anker){
     let schlimm = -1, art = 0;
     for(let i=0;i+1<f.length;i++){
       const d = f[i+1]-f[i];
-      if(d !== 1){ schlimm = i; art = d; break; }
+      if(d === 1) continue;
+      /* v0.33: übersprungene Felder sind echte Zeilen, wenn die Linien dort
+         gleichmäßig liegen. Auf dem Wohnungsverteiler stehen zwischen 8 und 9
+         eine Leerzeile, die Zeile "Q1 FI-Schalter ..." und noch eine
+         Leerzeile - die Probe entfernte drei echte Linien, und Q1 fiel in
+         Zeile 8. Eine überzählige Linie teilt dagegen eine Zeile, und die
+         Abstände werden ungleich. */
+      if(d >= 2 && gleichmaessig(lin, f[i], f[i+1] + 1, anker[i].x)) continue;
+      schlimm = i; art = d; break;
     }
     if(schlimm < 0) return {linien:lin, stand:'stimmig', felder:f, ergaenzt, entfernt};
     if(art === 0){
@@ -2248,6 +2305,11 @@ function versuche(t, erwartet){
 /* Stromkreisnummern laufen aufsteigend und lückenlos. Trifft eine spätere
    Nummer, fehlt dazwischen eine Zeile – das wird gemeldet statt verschoben. */
 function nummerDeuten(roh, erwartet){
+  /* v0.33: Gerätekennung statt Kreisnummer (Wohnungsverteiler: "Q1 FI-Schalter
+     für Stromkreis 9 und 10") - bleibt als Nummer stehen, zählt aber nicht in
+     der Folge mit. Jean, 25.09.2026: Q1 wird die Nummer. */
+  const q = /^\s*(Q\d{1,2})\s*$/.exec(roh || '');
+  if(q) return {roh, text: q[1], geaendert:false, unklar:false, luecke:0, a:null, b:null};
   /* v0.22: was mehrere Buchstaben trägt, die keiner Ziffer ähneln, ist keine
      Nummer. Auf dem Münch-Blatt landete durch eine falsche Spaltengrenze
      "Beleuchtung" in der Nummernspalte, und die Reparatur machte "819" daraus
@@ -2459,6 +2521,7 @@ async function lauf(){
   erzwungeneNummernGrenze = null;
   letzterNummernBericht = null;
   letzterZellenBericht = null;
+  teilungErlaubt = false;
   if(document.getElementById('optEntzerren').checked){
     const tE = jetzt();
     let vp = null, gefunden = 0;
@@ -2530,6 +2593,10 @@ async function lauf(){
     if(letzterNummernBericht) letzterNummernBericht.dauer = jetzt() - tS;
     try{ info = verarbeite(erg, arbeit, winkel, leseDauer, null); }catch(err){}
   }
+  /* v0.33: jetzt darf die Grenze aus "Nummer Text"-Paaren greifen - vorher
+     hätte sie dem Münch-Blatt den Nummernstreifen und die Klammern genommen */
+  teilungErlaubt = true;
+  try{ info = verarbeite(erg, arbeit, winkel, leseDauer, null) || info; }catch(err){}
 
   /* v0.30: jede beschriebene Zelle einzeln lesen */
   if(document.getElementById('optZellen').checked && info && info.geometrie){
@@ -2741,20 +2808,68 @@ async function nummernstreifenLesen(arbeit, st){
   /* Klammerstriche: alles, was senkrecht länger als 1,2 Zeilenhöhen durchläuft */
   const lang = Math.round(1.2*st.h);
   const weg = new Uint8Array(WB*H), laeufe = [];
-  for(let x = 0; x < WB; x++){
-    let a = -1;
-    for(let y = 0; y <= H; y++){
-      const t = y < H && (pb[y*WB+x] - gb[y*WB+x] > 60);
-      if(t && a < 0) a = y;
-      if(!t && a >= 0){
-        if(y - a > lang){
-          laeufe.push({x, a, b: y});
-          for(let yy = a; yy < y; yy++) for(let dx = -2; dx <= 2; dx++){
-            const xx = x + dx; if(xx >= 0 && xx < WB) weg[yy*WB+xx] = 1;
-          }
-        }
-        a = -1;
+  /* v0.33: verfolgt statt Spalte für Spalte - je Zeile darf der Strich einen
+     Bildpunkt seitwärts laufen. Auf dem Wohnungsverteiler trennt nur ein
+     Tabellenstrich die Nummern vom Ort, und der steht nach dem Geraderichten
+     um gut 1 Grad schräg; in keiner einzelnen Bildspalte war er lang genug,
+     blieb stehen, füllte die Lücke, und "1 Wohnzimmer" blieb ein Kasten. */
+  const dunkel = (x, y) => x >= 0 && x < WB && pb[y*WB+x] - gb[y*WB+x] > 60;
+  const besucht = new Uint8Array(WB*H);
+  for(let y0 = 0; y0 < H; y0++) for(let x0 = 0; x0 < WB; x0++){
+    const i0 = y0*WB + x0;
+    if(besucht[i0] || !dunkel(x0, y0)) continue;
+    if(y0 > 0 && (dunkel(x0, y0-1) || dunkel(x0-1, y0-1) || dunkel(x0+1, y0-1))) continue;
+    const pfad = [];
+    let x = x0, y = y0, luecke = 0;
+    while(y < H){
+      let nx = null;
+      if(dunkel(x, y)) nx = x; else if(dunkel(x-1, y)) nx = x-1; else if(dunkel(x+1, y)) nx = x+1;
+      if(nx === null){ if(++luecke > 2) break; }
+      else { luecke = 0; x = nx; besucht[y*WB+x] = 1; }
+      pfad.push(x); y++;
+    }
+    const b = y0 + pfad.length - luecke;
+    if(b - y0 > lang){
+      laeufe.push({x: x0, a: y0, b});
+      /* so breit löschen, wie der Strich dunkel ist (höchstens 6 Bildpunkte je
+         Seite): der linke Tabellenrand des Wohnungsverteilers ist dicker als
+         die Klammerstriche von Münch, sein Saum blieb stehen und galt als
+         Nummernblock */
+      for(let k = 0; k < b - y0; k++){
+        const yy = y0 + k, px = pfad[k];
+        weg[yy*WB + px] = 1;
+        for(let d = 1; d <= 6 && dunkel(px - d, yy); d++) weg[yy*WB + px - d] = 1;
+        for(let d = 1; d <= 6 && dunkel(px + d, yy); d++) weg[yy*WB + px + d] = 1;
+        if(px - 1 >= 0) weg[yy*WB + px - 1] = 1;
+        if(px + 1 < WB) weg[yy*WB + px + 1] = 1;
       }
+    }
+  }
+  /* v0.33: waagerechte Tabellenlinien ebenso. Sie laufen durch jede Spalte
+     des Streifens, und das Tintenprofil fiel auf dem Wohnungsverteiler
+     nirgends tief genug ab, um die Lücke hinter den Nummern zu zeigen. Auf dem
+     Münch-Blatt ohne Linien trat das nie auf. Nicht als Klammer gezählt. */
+  const breitLang = Math.round(1.5*st.h);
+  const besuchtW = new Uint8Array(WB*H);
+  const dunkelW = (x, y) => y >= 0 && y < H && pb[y*WB+x] - gb[y*WB+x] > 60;
+  for(let x0 = 0; x0 < WB; x0++) for(let y0 = 0; y0 < H; y0++){
+    if(besuchtW[y0*WB + x0] || !dunkelW(x0, y0)) continue;
+    if(x0 > 0 && (dunkelW(x0-1, y0) || dunkelW(x0-1, y0-1) || dunkelW(x0-1, y0+1))) continue;
+    const pfad = [];
+    let x = x0, y = y0, luecke = 0;
+    while(x < WB){
+      let ny = null;
+      if(dunkelW(x, y)) ny = y; else if(dunkelW(x, y-1)) ny = y-1; else if(dunkelW(x, y+1)) ny = y+1;
+      if(ny === null){ if(++luecke > 2) break; }
+      else { luecke = 0; y = ny; besuchtW[y*WB+x] = 1; }
+      pfad.push(y); x++;
+    }
+    const lang2 = pfad.length - luecke;
+    if(lang2 > breitLang) for(let k = 0; k < lang2; k++){
+      const xx = x0 + k, py = pfad[k];
+      weg[py*WB + xx] = 1;
+      for(let d = 1; d <= 6 && dunkelW(xx, py - d); d++) weg[(py - d)*WB + xx] = 1;
+      for(let d = 1; d <= 6 && dunkelW(xx, py + d); d++) weg[(py + d)*WB + xx] = 1;
     }
   }
   /* Der rechte Rand kommt aus dem Bild, nicht aus den Wortkästen - die sind
@@ -2792,16 +2907,31 @@ async function nummernstreifenLesen(arbeit, st){
   }
   kc.putImageData(img, 0, 0);
   const f = 3;
-  const gross = document.createElement('canvas'); gross.width = W*f; gross.height = H*f;
-  const gc = gross.getContext('2d');
-  gc.imageSmoothingEnabled = true; gc.imageSmoothingQuality = 'high';
-  gc.fillStyle = '#fff'; gc.fillRect(0, 0, gross.width, gross.height);
-  gc.drawImage(klein, 0, 0, gross.width, gross.height);
-  const erg2 = await dienst.recognize(gross, {noCache:true});
-  const woerter = holeWoerter(erg2).map(w => ({
-    text: w.text, confidence: w.confidence,
-    bbox: {x0: X + w.bbox.x0/f, x1: X + w.bbox.x1/f, y0: Y + w.bbox.y0/f, y1: Y + w.bbox.y1/f}
-  })).filter(w => nummerAehnlich(erstesTeil(w.text)));
+  /* v0.33: abschnittweise lesen. Auf dem Wohnungsverteiler reicht der
+     Streifen über die ganze Blatthöhe (Fußzeile) und wäre dreifach vergrößert
+     111 x 7900 Bildpunkte - die Erkennung verkleinert das intern so stark, dass
+     keine einzige Nummer übrig blieb. Je Abschnitt zehn Zeilenhöhen, zwei
+     überlappen; was in der Überlappung doppelt gelesen wird, zählt einmal. */
+  const abschnitt = Math.max(1, Math.round(10*st.h)), ueber = Math.round(2*st.h);
+  const woerter = [];
+  for(let ya = 0; ya < H; ya += abschnitt - ueber){
+    const yb = Math.min(H, ya + abschnitt);
+    const gross = document.createElement('canvas'); gross.width = W*f; gross.height = (yb - ya)*f;
+    const gc = gross.getContext('2d');
+    gc.imageSmoothingEnabled = true; gc.imageSmoothingQuality = 'high';
+    gc.fillStyle = '#fff'; gc.fillRect(0, 0, gross.width, gross.height);
+    gc.drawImage(klein, 0, ya, W, yb - ya, 0, 0, gross.width, gross.height);
+    const erg2 = await dienst.recognize(gross, {noCache:true});
+    holeWoerter(erg2).forEach(function(w){
+      const n = {text: w.text, confidence: w.confidence,
+        bbox: {x0: X + w.bbox.x0/f, x1: X + w.bbox.x1/f, y0: Y + ya + w.bbox.y0/f, y1: Y + ya + w.bbox.y1/f}};
+      if(!nummerAehnlich(erstesTeil(n.text))) return;
+      const my = (n.bbox.y0 + n.bbox.y1)/2;
+      if(woerter.some(q => Math.abs((q.bbox.y0 + q.bbox.y1)/2 - my) < 0.4*st.h)) return;
+      woerter.push(n);
+    });
+    if(yb >= H) break;
+  }
   laeufe.sort((p, q) => p.a - q.a);
   const striche = [];
   laeufe.forEach(function(l){
@@ -3007,6 +3137,7 @@ function ersetzeInErgebnis(erg, uebernommen){
    lässt wie die alte. Die Nummernspalte bleibt, wie sie ist: an ihr hängt das
    Zeilengesetz. */
 let letzterZellenBericht = null;
+let teilungErlaubt = false;   /* v0.33: Grenze aus "Nummer Text"-Paaren erst nach dem Nummernstreifen */
 
 /* Wie gut lässt sich ein Text deuten? 3 je Teil, der genau auf einer Liste
    steht, 2 für einen korrigierten Treffer oder eine Kreisnummer, 1 für etwas,
@@ -3238,6 +3369,9 @@ async function zellenLesen(arbeit, geo){
     /* Übernommen, wenn besser deutbar - bei gleicher Güte nur, wenn auch
        mindestens so sicher gelesen */
     if(neu && neu !== alt && (e.guteNeu > e.guteAlt || (e.guteNeu === e.guteAlt && confNeu >= z.conf))) e.uebernommen = true;
+    /* v0.33: ein leeres Feld wie in der Nachlese erst ab 80 % - Staub und
+       Risse werden sonst zu Text (Sicherungsbelegung: "111" mit 55 %) */
+    if(!z.woerter.length && confNeu < 80) e.uebernommen = false;
     if(e.uebernommen && !z.woerter.length){
       /* leeres Feld: der neue Kasten sitzt, wo der Text im Ausschnitt stand */
       const ua = Math.min.apply(null, w.map(q => q.bbox.x0)), ub = Math.max.apply(null, w.map(q => q.bbox.x1));
@@ -3272,6 +3406,7 @@ function holeWoerter(erg){
   const zeilen = Array.isArray(erg.lines) ? erg.lines : [];
   zeilen.forEach((zeile, zi) => {
     const woerter = Array.isArray(zeile) ? zeile : (zeile && zeile.words) ? zeile.words : [zeile];
+    const vorZeile = raus.length;
     woerter.forEach(w => {
       if(!w) return;
       const b = w.box || w.bbox || w.rect;
@@ -3296,6 +3431,20 @@ function holeWoerter(erg){
         vorher: w.vorher, confVorher: w.confVorher, zellGelesen: w.zellGelesen || w.vorher !== undefined
       });
     });
+    /* v0.33: Nummer und Text als zwei Wörter derselben erkannten Zeile, ohne
+       Lücke dazwischen - auf dem Wohnungsverteiler trennt nur ein Strich die
+       rechtsbündigen Nummern vom Ort, die Spaltensuche legte beides zusammen,
+       und die ganze Ortsspalte fiel in die Nummernspalte. Die Stelle zwischen
+       den beiden wird vermerkt; verarbeite() nimmt sie als Grenze, wenn der
+       Nummernstreifen nicht zu lesen war. */
+    const dieseZeile = raus.slice(vorZeile).sort((p, q) => p.bbox.x0 - q.bbox.x0);
+    for(let k = 0; k + 1 < dieseZeile.length; k++){
+      const a = dieseZeile[k], b = dieseZeile[k+1];
+      if(a.geteiltBei !== undefined) continue;
+      if(/^(Q\d{1,2}|\d{1,2}(\s?[-–\/]\s?\d{1,2})?)$/.test(a.text) && /^[A-Za-zÄÖÜäöüß]/.test(b.text) &&
+         b.bbox.x0 - a.bbox.x1 < 1.5*(a.bbox.y1 - a.bbox.y0))
+        a.geteiltBei = (a.bbox.x1 + b.bbox.x0)/2;
+    }
   });
   return raus;
 }
@@ -3339,12 +3488,32 @@ function verarbeite(erg, arbeit, winkel, leseDauer, nachleseBericht){
 
   /* 3. Spalten */
   let grenzen = null, gruppen = null;
+  /* v0.33: geteilte Kästen "Nummer Text" im linken Drittel geben die Grenze
+     Nummer/Text vor - wie der Nummernstreifen, nur ohne zweite Lesung */
+  const geteilt = gueltig.filter(w => w.geteiltBei !== undefined && w.bbox.x0 < arbeit.width/3);
+  /* nur als Rückfall: erst wenn die Nummernspalte Text trug und der
+     Nummernstreifen nicht zu lesen war (Münch liest ihn, und nur er misst die
+     Klammern) */
+  let teilGrenze = (teilungErlaubt && erzwungeneNummernGrenze === null && geteilt.length >= 3 &&
+                    !(letzterNummernBericht && letzterNummernBericht.uebernommen)) ? median(geteilt.map(w => w.geteiltBei)) : null;
   if(spalten && gueltig.length){
     let gr = spaltenFinden(gueltig, arbeit.width);
-    if(erzwungeneNummernGrenze !== null){
+    /* ... und nur, wenn die Spaltensuche Nummer und Text eines Paares in
+       dieselbe Spalte gelegt hat, mindestens zweimal - auf dem
+       Wohnungsverteiler in die Nummernspalte ("1 Wohnzimmer"), auf der
+       Sicherungsbelegung unten durch die Perspektive in die
+       Bezeichnungsspalte ("29 Küche Wand Fenster"). Wo die Paare sauber
+       getrennt liegen (Dewitz, Schmidtgen & Mieth), ändert sich nichts. */
+    if(teilGrenze !== null){
+      const spalteVon = x => !gr ? 0 : (x < gr.g0 ? 0 : (x < gr.g1 ? 1 : 2));
+      const verschmolzen = geteilt.filter(w => spalteVon((w.bbox.x0 + w.bbox.x1)/2) === spalteVon(w.geteiltBei + 0.5*(w.bbox.y1 - w.bbox.y0))).length;
+      if(verschmolzen < 2) teilGrenze = null;
+    }
+    rueck.teilung = teilGrenze !== null ? {anzahl: geteilt.length, grenze: teilGrenze} : null;
+    if(erzwungeneNummernGrenze !== null || teilGrenze !== null){
       /* v0.23: die Grenze Nummer/Text kommt aus dem Nummernstreifen; von
          den selbst gefundenen Grenzen zählt nur die nächste rechts davon */
-      const gz = erzwungeneNummernGrenze, hz = (gr && gr.hoehe) || 30;
+      const gz = erzwungeneNummernGrenze !== null ? erzwungeneNummernGrenze : teilGrenze, hz = (gr && gr.hoehe) || 30;
       const kand = gr ? [gr.g0, gr.g1].filter(v => isFinite(v) && v > gz + 2*hz) : [];
       gr = {g0: gz, g1: kand.length ? Math.min.apply(null, kand) : Infinity, hoehe: hz, zweispaltig: !kand.length};
     }
@@ -3373,7 +3542,7 @@ function verarbeite(erg, arbeit, winkel, leseDauer, nachleseBericht){
       {name:'Bezeichnung', zeilen: zeilenBilden(gruppen[1])},
       {name:'Ort',         zeilen: zeilenBilden(gruppen[2])}
     ];
-    if(erzwungeneNummernGrenze === null){
+    if(erzwungeneNummernGrenze === null && !rueck.teilung){
       try{ rueck.nummernStreifen = nummernStreifenSuchen(vorKopf, teile, arbeit.width, arbeit.height); }
       catch(e){ rueck.nummernStreifen = null; }
     }
@@ -3381,6 +3550,7 @@ function verarbeite(erg, arbeit, winkel, leseDauer, nachleseBericht){
     /* Messwerte: die tatsächlichen Höhen der Zeilenmitten je Spalte. Ohne die
        rechne ich gegen ein erfundenes Blatt statt gegen deins. */
     const mess = ['Zeilenhöhe: ' + Math.round(teile[0].zeilen.hoehe || 0)];
+    if(rueck.teilung) mess.push('Nummer und Text getrennt: ' + rueck.teilung.anzahl + ' Kästen begannen mit einer Nummer, Spaltengrenze ' + Math.round(rueck.teilung.grenze));
     teile.forEach(t => {
       const eintraege = t.zeilen.map(z => Math.round(z.mitte) + ' "' + z.text + '"');
       mess.push(t.name + ' (' + t.zeilen.length + '): ' + eintraege.join('  |  '));
@@ -3926,6 +4096,7 @@ const ABKUERZUNGEN = {
    wird gedeutet, aber angemerkt - sonst trägt SAM später einen Wert ein,
    den das Feld gar nicht kennt. */
 const NENNSTROEME_APP = [2, 6, 10, 16, 25, 32, 35, 40];
+const NENNSTROEME_NORM = [2, 4, 6, 8, 10, 13, 16, 20, 25, 32, 35, 40, 50, 63, 80, 100, 125];
 
 /* Aus "B16" wird Charakteristik B und 16 A, aus "25/0,03" ein FI mit 25 A
    und 30 mA - und damit zugleich die Gerätesorte, die der Kreis bekommt.
@@ -3961,7 +4132,10 @@ function sicherungDeuten(roh){
     erg.kennlinie = (m[1] === 'GG') ? 'gG' : (m[1] === 'GL' ? 'gL' : m[1]);
     erg.strom = +m[2];
     erg.text = erg.kennlinie + ' ' + erg.strom + ' A';
-  } else if((m = /^(\d{1,3})$/.exec(t)) && +m[1] <= 125){
+  } else if((m = /^(\d{1,3})$/.exec(t)) && NENNSTROEME_NORM.indexOf(+m[1]) >= 0){
+    /* v0.33: ein bloßer Strom nur, wenn es ihn als Nennstrom gibt - auf der
+       Sicherungsbelegung las die Zellenlesung im leeren Feld neben "Relais WC"
+       den eingerissenen Blattrand als "111", und daraus wurde "111 A" */
     erg.art = 'Strom'; erg.strom = +m[1];
     erg.text = erg.strom + ' A';
     erg.hinweis = 'ohne Kennlinie';
@@ -3993,7 +4167,13 @@ function listenwort(w){
   return (ort || bez) ? {ort, bez} : null;
 }
 function klebeLoesen(text){
-  return (text || '').split(' ').map(function(t){
+  /* v0.33: je Teil zwischen Schrägstrichen - "SteckdoseBad/WC" auf der
+     Sicherungsbelegung (zwei Aufbereitungen) blieb ganz, weil der Schrägstrich
+     das Wort aus der Prüfung warf */
+  return (text || '').split(' ').map(t => t.split('/').map(klebeTeil).join('/')).join(' ');
+}
+function klebeTeil(t){
+  return [t].map(function(t){
     const rein = t.replace(/[,;.]+$/, '');
     const rest = t.slice(rein.length);
     if(rein.length < 5 || !/^[A-Za-zÄÖÜäöüß-]+$/.test(rein) || listenwort(rein)) return t;
@@ -4037,8 +4217,20 @@ function teilDeuten(teil, liste){
     const k = liste[i];
     if(t.length <= k.length + 1) continue;
     const d = abstand(t.substring(0, k.length), k);
-    if(d <= Math.max(0, Math.round(k.length*0.2)))
-      return {text: k + t.substring(k.length), herkunft: d ? 'korrigiert' : 'gelesen'};
+    if(d <= Math.max(0, Math.round(k.length*0.2))){
+      /* v0.33: die Wörter hinter dem Treffer ebenfalls einzeln prüfen - Blatt
+         2, Aufbereitung Pillow bilinear: "Steckdose Waschmiaschine" blieb so
+         stehen, weil nur das erste Wort verglichen wurde. Nur Wörter ab fünf
+         Zeichen, und nur eindeutige, nahe Treffer (besteWahl). */
+      let rest = t.substring(k.length), neu = false;
+      rest = rest.replace(/[A-Za-zÄÖÜäöüß]{5,}/g, function(w){
+        if(liste.some(x => x.toLowerCase() === w.toLowerCase())) return w;
+        const b = besteWahl(w, liste);
+        if(b && b.d){ neu = true; return b.wort; }
+        return w;
+      });
+      return {text: k + rest, herkunft: (d || neu) ? 'korrigiert' : 'gelesen'};
+    }
   }
   const w = besteWahl(t, liste);
   if(w) return {text:w.wort, herkunft: w.d ? 'korrigiert' : 'gelesen'};
@@ -4056,7 +4248,8 @@ function feldDeuten(roh, liste){
   /* v0.17: auch das Komma trennt ("Küche, Flur, Kammer"). Orte werden mit
      Komma verbunden, so wie der E-Assistent sie schreibt; Bezeichnungen
      bleiben beim Schrägstrich. */
-  const teile = t.split(/[\/,;]/);
+  /* v0.33: auch "+" trennt ("Bad + Küche", Wohnungsverteiler, handschriftlich) */
+  const teile = t.split(/[\/,;+]/);
   const raus = [];
   let korrigiert = false, frei = false;
   for(let i=0;i<teile.length;i++){
@@ -4152,6 +4345,12 @@ function rollenVerteilen(teile){
   if(rest.length === 2){
     rollen[1] = 'bezeichnung';
     rollen[2] = 'ort';
+    /* v0.33: die Rolle aus dem Inhalt auch hier - auf dem Wohnungsverteiler
+       steht der Ort links ("Nr. | Ort | Verbraucher"); nach der Lage vergeben
+       gingen dort Orte verloren, die neben Text standen ("Bad + Kiche") */
+    if(g[1].n >= 3 && g[2].n >= 3 && g[1].ort > g[1].bez && g[1].ort >= 0.6 && g[2].bez > g[2].ort){
+      rollen[1] = 'ort'; rollen[2] = 'bezeichnung';
+    }
   } else if(rest.length === 1){
     const i = rest[0];
     rollen[i] = (g[i].n && g[i].ort > g[i].bez && g[i].ort >= 0.5) ? 'ort' : 'bezeichnung';
@@ -4182,6 +4381,7 @@ function rollenVerteilen(teile){
 function kreisStriche(t){
   return (t || '').replace(/(\d)\s*[\/,\-–—.]+\s*(\d)/g, '$1–$2');
 }
+const LAGEWOERTER = ['wand', 'fenster', 'tür', 'tuer', 'decke', 'boden', 'links', 'rechts', 'mitte', 'oben', 'unten', 'eingang'];
 function istRaum(w){
   const l = (w || '').toLowerCase();
   return l && ORTE.some(x => x.toLowerCase() === l);
@@ -4197,9 +4397,29 @@ function aufsSchema(r){
   if(r.n && r.n.text) r.n.text = kreisStriche(r.n.text).replace(/\s+/g, '');
   const bez = (r.bez && !r.bez.leer) ? r.bez.text : '';
   const sich = (r.sich && !r.sich.leer) ? r.sich.text : '';
-  const istFI = /fehlerstrom|schutzschalter/i.test(bez) || /^FI\b/.test(sich);
+  const FI_WORT = /fehlerstrom|schutzschalter|\bF[Il1|]\s*[-‐‑–]?\s*Schalter\b/i;
+  const ortText = (r.ort && !r.ort.leer) ? r.ort.text : '';
+  /* v0.33: der FI kann auch in der Ortsspalte stehen, wenn die Bezeichnung leer
+     ist - auf dem Wohnungsverteiler steht "Q1 FI-Schalter für Stromkreis 9 und
+     10" in der linken Spalte, und die ist dort die Ortsspalte */
+  const fiImOrt = !bez && FI_WORT.test(ortText);
+  const istFI = FI_WORT.test(bez) || fiImOrt || /^FI\b/.test(sich);
   if(istFI){
+    /* v0.33: steht die Beschreibung "für Stromkreis 9 und 10" in der
+       Bezeichnung oder als ganzer Eintrag im Ort, wird der Ort
+       "Stromkreis 9–10" (Jean, 25.09.2026) */
+    const sk = /Stromkreis[e]?\s+(\d+)(?:\s*(?:und|bis|,|\/|-|–)\s*(\d+))?/i.exec(fiImOrt ? ortText : bez);
+    const skText = sk ? 'Stromkreis ' + sk[1] + (sk[2] ? '–' + sk[2] : '') : '';
+    if(sk && r.ort && (r.ort.leer || fiImOrt)){ setze(r.ort, skText); r.ort.roh = skText; }
+    if(sk && !r.ort) r.ort = {text: skText, herkunft: 'korrigiert', leer: false, unklar: false, roh: skText};
+    if(fiImOrt && !sk && r.ort) setze(r.ort, '');
     if(!/fehlerstrom/i.test(bez)) setze(r.bez, 'FI-Schutzschalter');
+    /* v0.33 (Jean, 25.09.2026): steht am FI nur ein Nennstrom ("25A"), ist es
+       ein FI mit 30 mA; zweipolig über seine Teilungseinheiten wählt später der
+       Prüfassistent. Sicherungsbelegung Elektro Jüngling, 13-14 und 25-26. */
+    if(r.sich && !r.sich.leer && r.sich.art === 'Strom' && r.sich.strom){
+      setze(r.sich, 'FI ' + r.sich.strom + ' A / 30 mA'); r.sich.art = 'FI'; r.sich.ma = 30; r.sich.hinweis = '';
+    }
     if(r.ort){
       const roh = (r.ort.roh || r.ort.text || '').replace(/\s+/g, ' ').trim();
       setze(r.ort, roh ? kreisStriche(roh) : '');
@@ -4208,22 +4428,43 @@ function aufsSchema(r){
   }
   /* Ortsspalte: Räume bleiben, alles andere wandert zur Bezeichnung */
   let b = bez, raeume = [];
+  /* v0.33 (Jean, 25.09.2026): "und" verbindet ein Paar wie der Schrägstrich
+     (Wohnungsverteiler: "Beleuchtung und Steckdosen" -> "Beleuchtung,
+     Steckdosen"); "Herd" wird E-Herd (Sicherungsbelegung 20-22) */
+  b = b.replace(/\s+und\s+/g, '/').replace(/^Herd\b/, 'E-Herd');
   if(r.ort && !r.ort.leer){
     const rest = [];
     /* v0.30: Räume über die Kürzeltabelle - sonst bleibt "Bad" stehen, wenn
        die Ortsspalte außer dem Raum noch etwas trägt (Münch, Zeile 11) */
-    r.ort.text.split(/[,\s]+/).filter(Boolean).forEach(function(w){
-      if(!istRaum(w)){ rest.push(w); return; }
+    r.ort.text.split(/[,+\s]+/).filter(w => w && w !== 'und').forEach(function(w){
+      if(!istRaum(w)){
+        /* v0.33: nahe Treffer auf der Ortsliste zählen als Raum ("Kiche") */
+        const d = w.length >= 4 ? teilDeuten(w, ORTE) : null;
+        if(d && istRaum(d.text)) raeume.push(d.text); else rest.push(w);
+        return;
+      }
       const ab = ABKUERZUNGEN[w.toLowerCase()];
       raeume.push(ab && ORTE.indexOf(ab) >= 0 ? ab : w);
     });
     if(rest.length) b = (b ? b + ' ' : '') + rest.join(' ');
+  }
+  /* v0.33: ein Raum vorn in der Bezeichnung ist der Ort, wenn es keinen
+     anderen gibt; bleiben danach nur Lageangaben übrig, sind es Steckdosen an
+     dieser Stelle (Jean: "Küche Wand Fenster" -> "SD Wand, Fenster | Küche") */
+  const vorn = b.split(/\s+/);
+  if(!raeume.length && (!r.ort || r.ort.leer) && vorn.length > 1 && istRaum(vorn[0])){
+    const ab = ABKUERZUNGEN[vorn[0].toLowerCase()];
+    raeume.push(ab && ORTE.indexOf(ab) >= 0 ? ab : vorn[0]);
+    b = vorn.slice(1).join(' ');
+    const lage = b.split(/[\s\/,]+/).filter(Boolean);
+    if(lage.length && lage.every(w => LAGEWOERTER.indexOf(w.toLowerCase()) >= 0)) b = 'SD ' + lage.join(', ');
   }
   b = b.replace(/\s*\/\s*/g, ', ').replace(/\s+/g, ' ').trim();
   b = b.replace(/Überspannungsschutz/g, 'Überspannungsableiter');
   if(/^Geschirrspüler\b/.test(b)) b = 'Steckdose ' + b;
   if(b !== bez) setze(r.bez, b);
   if(r.ort && (raeume.length || !r.ort.leer)) setze(r.ort, raeume.join(', '));
+  if(!r.ort && raeume.length) r.ort = {text: raeume.join(', '), herkunft: 'korrigiert', leer: false, unklar: false, roh: ''};
   if(r.ort && r.ort.leer && (/^E-Herd\b/.test(b) || /^Steckdose Geschirrspüler\b/.test(b))) setze(r.ort, 'Küche');
 }
 
@@ -4318,13 +4559,7 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
       n = nach ? nummerDeuten(z.text, erwartet)
                : {text: saeubern(z.text) || '—', roh:z.text, geaendert:false, unklar:false, luecke:0, b:null};
       n.herkunft = n.geaendert ? 'korrigiert' : 'gelesen';
-    } else {
-      /* Keine Nummer gelesen, aber das Raster sagt: hier ist eine Zeile.
-         Die Nummer wird fortgezählt und als abgeleitet gekennzeichnet. */
-      n = {text:String(erwartet), roh:'', geaendert:false, unklar:false, luecke:0,
-           b:erwartet, herkunft:'frei', abgeleitet:true};
-    }
-    if(n.b !== null && n.b !== undefined) erwartet = n.b + 1;
+    } else n = null;   /* v0.33: erst nach dem Inhalt entscheiden, siehe unten */
 
     const roh = {}, restwert = {}, quelle = {};
     [1,2].forEach(function(i){
@@ -4339,6 +4574,26 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
                    (!gitter && fortsetzung[i][zi] ? ' ' + fortsetzung[i][zi].join(' ') : '');
       restwert[rolle] = (zuord[i].rest && zuord[i].rest[j] !== undefined) ? zuord[i].rest[j] : 0;
     });
+    if(!n){
+      /* Keine Nummer gelesen, aber das Raster sagt: hier ist eine Zeile.
+         v0.33: ohne Inhalt ist es eine Leerzeile und fällt weg - auf dem
+         Wohnungsverteiler stehen zwischen 8 und 9 zwei davon, und ihre
+         fortgezählten Nummern 9* und 11* stießen mit den echten zusammen.
+         Beginnt der Inhalt mit einer Gerätekennung ("Q1 FI-Schalter für
+         Stromkreis 9 und 10"), wird sie die Nummer (Jean, 25.09.2026). Sonst
+         wird fortgezählt und als abgeleitet gekennzeichnet (Blatt 2, 45-48). */
+      const rollenMitText = Object.keys(roh).filter(k => saeubern(roh[k]));
+      if(!rollenMitText.length) return;
+      let q = null;
+      rollenMitText.forEach(function(k){
+        const m = /^\s*(Q\d{1,2})\s+(.*)$/.exec(roh[k]);
+        if(m && !q){ q = m[1]; roh[k] = m[2]; }
+      });
+      n = q ? {text:q, roh:q, geaendert:false, unklar:false, luecke:0, a:null, b:null, herkunft:'gelesen'}
+            : {text:String(erwartet), roh:'', geaendert:false, unklar:false, luecke:0,
+               b:erwartet, herkunft:'frei', abgeleitet:true};
+    }
+    if(n.b !== null && n.b !== undefined) erwartet = n.b + 1;
 
     let bez = leerD(), ort = leerD(), sich = leerD();
     if(!nach){
@@ -4361,7 +4616,12 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
           if(!alsBez.leer && !alsBez.unklar && alsBez.herkunft !== 'frei'){
             bez = alsBez; bez.roh = roh.ort; bez.geholt = true;
           } else if(!o.leer){ ort = o; ort.roh = roh.ort; }
-        } else if(!o.leer){ ort = o; ort.roh = roh.ort; }
+        } else if(!o.leer && (ort.leer || /[A-Za-zÄÖÜäöüß]{2}/.test(o.text))){ ort = o; ort.roh = roh.ort; }
+        /* v0.33: ein "Ort" ohne Buchstaben überschreibt keinen, der aus der
+           Bezeichnungszelle kam - auf dem Schmidtgen-Blatt las die Erkennung
+           ein Staubkorn rechts neben "Relais Flur" als "1". Bis v0.32 galt
+           diese Spalte zufällig als Absicherung ("1 A"); seit bloße Ströme echte
+           Nennströme sein müssen, ist sie eine Ortsspalte. */
       }
       if(roh.absicherung){ sich = sicherungDeuten(roh.absicherung); sich.roh = roh.absicherung; }
     }
