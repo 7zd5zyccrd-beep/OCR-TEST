@@ -1,7 +1,33 @@
 <!DOCTYPE html>
 <!--
   PaddleOCR-Test · Verteilerbeschreibung
-  v0.29 · 22.09.2026
+  v0.31 · 25.09.2026
+
+  v0.31: Klammern zusammenfassen und eine Ziffer als Platzhalter. Die seit
+  v0.28 gemessenen Klammern der Nummernspalte (Muench: 1-2, 5-6, 9-10,
+  13-15, 16-18, 19-20) werden zu einem Eintrag "a-b"; der Inhalt kommt aus der
+  Zeile der Gruppe, die Text traegt - tragen mehrere Text, bleibt alles, wie
+  es ist. In der Nummerndeutung steht ein einzelnes Zeichen, das keiner Ziffer
+  aehnelt, fuer die Ziffer, die die Folge erwartet (Dewitz, eine Aufbereitung:
+  "2@/21" wurde "2-21" statt 20-21). Stand am Rechner ueber 5 Aufbereitungen:
+  51 von 53 in jeder, Blatt 2 12/12, Muench 14/16, Schmidtgen & Mieth 14/14,
+  Dewitz 11/11. Offen sind nur die handschriftlichen Zeilen 12 und 24 bei
+  Muench - abgesprochen: Handschrift ist ein Fall fuer die Bestaetigungsliste.
+
+  v0.30: Zellenlesung. Sobald Zeilen und Spalten stehen, wird jede Zelle der
+  beschriebenen Zeilen einzeln gelesen: ausgeschnitten entlang ihrer beiden
+  Linien (streifenweise, so folgt der Schnitt auch der Welle von Blatt 2),
+  Striche geloescht, mit Papierrand. Anlass war der Prueflauf am Rechner
+  (werkzeuge/pruefen.mjs --streuung): je nach Aufbereitung des Fotos kippte
+  Blatt 2 zwischen 11 und 12 von 12 (Zeile 44 "B6" wurde "25/0,0"),
+  Schmidtgen & Mieth zwischen 13 und 14 von 14 ("Relais 1"). Uebernommen wird
+  die neue Lesung, wenn sie besser deutbar ist, bei gleicher Guete nur mit
+  mindestens gleicher Sicherheit. Zellen, die sie gelesen hat, liest die
+  Nachlese nicht noch einmal - deren 1,6 Zeilen hoher Streifen war es, der in
+  Zeile 44 die Nachbarzeile einfing. Dazu: Raeume in der Ortsspalte laufen
+  ueber die Kuerzel (Bad -> Badezimmer auch neben anderem Text). Stand am
+  Rechner ueber 5 Aufbereitungen: Blatt 2 12/12, Schmidtgen & Mieth 14/14,
+  Dewitz 10-11/11, Muench 8/16 (vorher 11-12, 13-14, 10-11, 8).
 
   v0.29: Deutung aufs Schema des E-Assistenten (Jeans Festlegungen). Neue
   letzte Stufe aufsSchema() vor der Ausgabe: Kreisnummern mit Gedankenstrich,
@@ -640,7 +666,7 @@ pre.abgleich.gut{background:#EAF5DC;border-color:#8FBE36}
 
   <header>
     <h1>PaddleOCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.29 · 22.09.2026</span>
+    <span class="ver">v0.31 · 25.09.2026</span>
   </header>
 
   <div class="karte">
@@ -704,6 +730,7 @@ pre.abgleich.gut{background:#EAF5DC;border-color:#8FBE36}
       <div class="schalter"><input type="checkbox" id="optSpalten" checked><label for="optSpalten">Spalten trennen</label></div>
       <div class="schalter"><input type="checkbox" id="optNach" checked><label for="optNach">Nummern und Wörter nachbearbeiten</label></div>
       <div class="schalter"><input type="checkbox" id="optLinien" checked><label for="optLinien">Gedruckte Tabellenlinien suchen</label></div>
+      <div class="schalter"><input type="checkbox" id="optZellen" checked><label for="optZellen">Jede beschriebene Zelle einzeln lesen</label></div>
       <div class="schalter"><input type="checkbox" id="optNachlese" checked><label for="optNachlese">Zweifelhafte Zellen einzeln nachlesen</label></div>
     </div>
     <p class="hinweis" id="fotoinfo">Am besten dasselbe Blatt wie bisher, damit wir vergleichen können.</p>
@@ -811,13 +838,13 @@ const MODELLE = {
   latin: {name:'v5 lateinisch',  konstante:'V5_LATIN_MOBILE_MODEL'}
 };
 
-const VERSION = 'v0.29 · 22.09.2026';
+const VERSION = 'v0.31 · 25.09.2026';
 
 /* ==================== Schrittliste ==================== */
 
 const SCHRITTE = [['modul','Bibliothek laden'],['start','Dienst starten, Modelle holen'],
                   ['foto','Foto einlesen'],['lesen','Text erkennen'],['nach','Nachbearbeiten'],
-                  ['nachlese','Zweifelhafte Zellen nachlesen']];
+                  ['zellen','Zellen einzeln lesen'],['nachlese','Zweifelhafte Zellen nachlesen']];
 const liste = document.getElementById('schritte');
 const zeilenEl = {};
 SCHRITTE.forEach(([id, text]) => {
@@ -2242,6 +2269,25 @@ function nummerDeuten(roh, erwartet){
       return erg;
     }
   }
+  /* v0.31: ein einzelnes Zeichen, das keiner Ziffer ähnelt, steht für eine
+     Ziffer. Dewitz, Aufbereitung "Pillow bikubisch": "2@/21" - ohne das "@"
+     blieb "2/21", und aus 20/21 wurde "2–21". Genommen wird nur, was genau die
+     erwartete Nummer ergibt. */
+  const platz = (roh || '').replace(/\s/g, '').split('').map(function(c){
+    if(/[0-9\/]/.test(c)) return c;
+    if(c === '-' || c === '–' || c === '—') return '-';
+    return ZU_ZIFFER[c] || '?';
+  }).join('');
+  if((platz.match(/\?/g) || []).length === 1 && /\d\?|\?\d/.test(platz)){
+    for(let e = erwartet; e <= erwartet + 4; e++) for(let d = 0; d <= 9; d++){
+      const zz = zerlege(platz.replace('?', String(d)));
+      if(zz && zz.a === e && zz.b >= zz.a && zz.b - zz.a < 12){
+        erg.a = zz.a; erg.b = zz.b; erg.text = schreibe(zz);
+        erg.geaendert = true; erg.luecke = e - erwartet;
+        return erg;
+      }
+    }
+  }
   const z = zerlege(t);
   if(z){ erg.a = z.a; erg.b = Math.max(z.a, z.b); erg.text = schreibe(z); }
   /* v0.17: eine sauber gelesene, aufsteigende Nummer jenseits des Fensters
@@ -2405,6 +2451,7 @@ async function lauf(){
   letzteEntzerrung = null;
   erzwungeneNummernGrenze = null;
   letzterNummernBericht = null;
+  letzterZellenBericht = null;
   if(document.getElementById('optEntzerren').checked){
     const tE = jetzt();
     let vp = null, gefunden = 0;
@@ -2475,6 +2522,31 @@ async function lauf(){
     }
     if(letzterNummernBericht) letzterNummernBericht.dauer = jetzt() - tS;
     try{ info = verarbeite(erg, arbeit, winkel, leseDauer, null); }catch(err){}
+  }
+
+  /* v0.30: jede beschriebene Zelle einzeln lesen */
+  if(document.getElementById('optZellen').checked && info && info.geometrie){
+    t0 = jetzt();
+    setze('zellen','laeuft');
+    try{
+      const bericht = await zellenLesen(arbeit, info.geometrie);
+      bericht.dauer = jetzt() - t0;
+      letzterZellenBericht = bericht;
+      const uebernommen = bericht.zellen.filter(z => z.uebernommen);
+      if(uebernommen.length) ersetzeInErgebnis(erg, uebernommen);
+      /* Was die Zellenlesung schon gelesen hat, liest die Nachlese nicht noch
+         einmal: ihr Streifen ist 1,6 Zeilen hoch und fing auf Blatt 2 in Zeile 44
+         statt "B6" das "25/0,0" der Nachbarzeile ein. */
+      markiereGelesen(erg, bericht.zellen.filter(z => !z.uebernommen));
+      info = verarbeite(erg, arbeit, winkel, leseDauer, null);
+      setze('zellen','gut', bericht.zellen.length + ' gelesen, ' + uebernommen.length + ' übernommen', jetzt()-t0);
+    }catch(err){
+      letzterZellenBericht = {aus: 'abgebrochen – ' + err.message, zellen: []};
+      setze('zellen','schlecht', err.message, jetzt()-t0);
+    }
+  } else {
+    letzterZellenBericht = {aus: document.getElementById('optZellen').checked ? 'keine Tabelle gefunden' : 'abgeschaltet', zellen: []};
+    setze('zellen','gut', letzterZellenBericht.aus);
   }
 
   /* Nachlese: Zellen, die die Deutung nicht einordnen kann oder die mit
@@ -2904,6 +2976,287 @@ function ersetzeInErgebnis(erg, uebernommen){
   });
 }
 
+/* ==================== Zellenlesung (v0.30) ====================
+
+   Anlass: der Prüflauf am Rechner (werkzeuge/pruefen.mjs --streuung).
+   Dieselbe Fassung liest Blatt 2 je nach Aufbereitung des Fotos mit 11 oder
+   12 von 12: in Zeile 44 wird aus "B6" ein "25/0,0", weil die Erkennung auf
+   dem ganzen Bild die Kästen der unteren, schiefen Zeilen über die Linien
+   hinweg legt. Schmidtgen & Mieth kippt genauso (13 oder 14 von 14).
+
+   Versuch am Rechner, Blatt 2, Zeilen 37-48: jede Zelle für sich
+   ausgeschnitten, entlang ihrer beiden Linien streifenweise gerade gezogen -
+   so folgt der Schnitt auch der Welle des Blattes -, die Striche gelöscht und
+   einzeln gelesen. Ergebnis in sechs verschiedenen Aufbereitungen praktisch
+   derselbe Text, alle zwölf Absicherungen richtig, auch die 44. Das ganze
+   Blatt vorher zu entzerren half dagegen nicht (7 bis 8 von 12): die Schrift
+   saß danach auf den Linien, und das größere Bild verkleinert die Erkennung
+   intern stärker.
+
+   Deshalb liest die App jetzt, sobald Zeilen und Spalten stehen, jede Zelle
+   der beschriebenen Zeilen einzeln - Zeilen aus den gedruckten Linien, sonst
+   aus dem Zeilengesetz der Nummernspalte, Spalten aus den gefundenen Grenzen.
+   Übernommen wird die neue Lesung, wenn sie sich mindestens so gut deuten
+   lässt wie die alte. Die Nummernspalte bleibt, wie sie ist: an ihr hängt das
+   Zeilengesetz. */
+let letzterZellenBericht = null;
+
+/* Wie gut lässt sich ein Text deuten? 3 je Teil, der genau auf einer Liste
+   steht, 2 für einen korrigierten Treffer oder eine Kreisnummer, 1 für etwas,
+   das nach einem Wort aussieht, 0 für Zeichensalat - gemittelt, damit ein
+   angehängtes Staubkorn die Lesung schlechter macht und nicht besser. */
+function lesegute(text, rolle){
+  const t = saeubern(text);
+  if(!t) return 0;
+  if(rolle === 'absicherung'){
+    const s = sicherungDeuten(t);
+    return s.art ? (s.herkunft === 'gelesen' ? 3 : 2) : 0.5;
+  }
+  const teile = klebeLoesen(t).split(/[\s\/,;:]+/).filter(Boolean);
+  if(!teile.length) return 0;
+  const liste = BEZEICHNUNGEN.concat(ORTE);
+  /* Ziffern zählen nur neben Wörtern ("Stromkreis 9-12"); eine Zelle, die nur
+     aus einer Zahl besteht, ist in einer Textspalte meist ein Rest der
+     Nummernspalte (Dewitz: "11" neben 16-19) */
+  const mitWort = teile.some(p => /[A-Za-zÄÖÜäöüß]{2}/.test(p));
+  let s = 0;
+  teile.forEach(function(p){
+    if(/^\d+([–\-.]\d+)?$/.test(p)){ s += mitWort ? 2 : 0; return; }
+    const d = teilDeuten(p, liste);
+    if(d) s += (d.herkunft === 'gelesen') ? 3 : 2;
+    else if(siehtNachWortAus(p)) s += 1;
+  });
+  return s / teile.length;
+}
+
+/* Welche Zellen gelesen werden: alle Inhaltsspalten der Zeilen, in denen
+   irgendetwas steht - auch die leeren Felder daneben (Blatt 2, 45 bis 48:
+   dort fand die Erkennung auf dem ganzen Bild keinen einzigen Kasten). */
+function zellenPlanen(geo, breite){
+  const gitter = geo.gitter, raster = geo.raster, teile = geo.teile, grenzen = geo.grenzen || [];
+  if(!teile) return {zellen:[], grund:'keine Spalten'};
+  if(!gitter && !raster) return {zellen:[], grund:'weder Linienraster noch Zeilengesetz'};
+  const zeileVon = function(x, y){
+    if(gitter){ const f = gitter.feld(x, y); return f ? f.i : null; }
+    const k = kVon(raster.gesetz, y);
+    return (k === null || !isFinite(k)) ? null : Math.round(k);
+  };
+  const g0 = isFinite(grenzen[0]) ? grenzen[0] : 0;
+  const g1 = isFinite(grenzen[1]) ? grenzen[1] : breite;
+  const spaltenX = [[0, g0], [g0, g1], [g1, breite]];
+  const hRef = geo.hoehe || 40;
+  const spanne = {}, belegt = {}, zeilen = {};
+  [0, 1, 2].forEach(function(i){
+    if(i > 0 && spaltenX[i][1] - spaltenX[i][0] < 2*hRef) return;
+    teile[i].zeilen.forEach(function(z){
+      (z.woerter || []).forEach(function(w){
+        if(!w.bbox) return;
+        const r = zeileVon((w.bbox.x0 + w.bbox.x1)/2, (w.bbox.y0 + w.bbox.y1)/2);
+        if(r === null) return;
+        const s = spanne[i] = spanne[i] || [Infinity, -Infinity];
+        s[0] = Math.min(s[0], w.bbox.x0); s[1] = Math.max(s[1], w.bbox.x1);
+        (belegt[r + '|' + i] = belegt[r + '|' + i] || []).push(w);
+        if(i > 0) zeilen[r] = true;
+      });
+    });
+  });
+  const zellen = [];
+  Object.keys(zeilen).map(Number).sort(function(a, b){ return a - b; }).forEach(function(r){
+    let oben, unten, hr;
+    if(gitter){
+      const L0 = gitter.linien[r], L1 = gitter.linien[r + 1];
+      if(!L0 || !L1) return;
+      hr = linieBei(L1, breite/2) - linieBei(L0, breite/2);
+      if(!(hr > 4)) return;
+      /* die Striche selbst bleiben draußen */
+      const ein = Math.max(2, 0.08*hr);
+      oben = x => linieBei(L0, x) + ein;
+      unten = x => linieBei(L1, x) - ein;
+    } else {
+      const ya = yVon(raster.gesetz, r - 0.5), yb = yVon(raster.gesetz, r + 0.5);
+      if(ya === null || yb === null || !(yb - ya > 4)) return;
+      hr = yb - ya;
+      /* ohne Linien ist die Grenze die Mitte zwischen zwei Zeilen - ein wenig
+         Luft, damit Ober- und Unterlängen nicht abgeschnitten werden */
+      oben = () => ya - 0.08*hr;
+      unten = () => yb + 0.08*hr;
+    }
+    [1, 2].forEach(function(i){
+      if(!spanne[i]) return;
+      const w = (belegt[r + '|' + i] || []).slice().sort((p, q) => p.bbox.x0 - q.bbox.x0);
+      /* Die Kanten kommen von den Wörtern, nicht von den Spaltengrenzen: auf dem
+         Münch-Blatt ragt "FI - Schutzschalter" über die Grenze, und ein Schnitt
+         dort gab "Fl - Schutzscl" links und "halter Wohnräume" rechts. Begrenzt
+         wird nur durch die Wörter der Nachbarspalten in derselben Zeile. Wenig
+         Rand, denn neben der Schrift steht oft ein Spaltenstrich, der sonst als
+         "|", "I" oder "1" mitgelesen wird (Blatt 2: "|B20", "125/0,03"). Ein
+         leeres Feld reicht rechts bis zur Spaltengrenze - auf Blatt 2 sind die
+         Texte in 47 und 48 länger als alles, was darüber steht. */
+      const links = belegt[r + '|' + (i - 1)] || [], rechts = belegt[r + '|' + (i + 1)] || [];
+      const m = 0.15*hr;
+      let xa = (w.length ? w[0].bbox.x0 : spanne[i][0]) - m;
+      let xb = w.length ? Math.max.apply(null, w.map(q => q.bbox.x1)) + m : spaltenX[i][1];
+      links.forEach(q => { xa = Math.max(xa, q.bbox.x1 + 2); });
+      rechts.forEach(q => { xb = Math.min(xb, q.bbox.x0 - 2); });
+      xa = Math.max(0, xa); xb = Math.min(breite, xb);
+      if(xb - xa < hr) return;
+      /* Das Band auf die gelesenen Wörter zentrieren, wenn das Raster dort
+         daneben liegt - auf dem Dewitz-Schild sind drei Linien ergänzt, und
+         eine davon läuft durch "9 Steckdosen Küche" (sitzt zwischen zwei
+         Zeilen, -0,42). Ohne das halbiert der Schnitt die Buchstaben. */
+      let ob = oben, un = unten;
+      if(w.length){
+        const xm = w.reduce((s2, q) => s2 + (q.bbox.x0 + q.bbox.x1)/2, 0)/w.length;
+        const ym = w.reduce((s2, q) => s2 + (q.bbox.y0 + q.bbox.y1)/2, 0)/w.length;
+        let dy = ym - (oben(xm) + unten(xm))/2;
+        if(Math.abs(dy) > 0.15*hr){
+          dy = Math.max(-0.5*hr, Math.min(0.5*hr, dy));
+          ob = x => oben(x) + dy; un = x => unten(x) + dy;
+        }
+      }
+      zellen.push({r, spalte:i, xa, xb, oben: ob, unten: un, hr, gitter: !!gitter, woerter: w,
+                   text: w.map(q => q.text).join(' '),
+                   conf: w.length ? w.reduce((s, q) => s + q.confidence, 0)/w.length : 0});
+    });
+  });
+  return {zellen};
+}
+
+/* Die Zelle ausschneiden: in Streifen von etwa einer Zeilenhöhe, jeder
+   Streifen für sich zwischen oberer und unterer Linie auf die volle Höhe
+   gezogen. Danach die Striche löschen, die doch noch hineinragen, und mit
+   Papierfarbe umranden - die Erkennung braucht Rand um die Schrift. */
+function zelleZeichnen(arbeit, z){
+  const f = 2;
+  const H = Math.max(8, Math.round(z.hr*f)), W = Math.max(8, Math.round((z.xb - z.xa)*f));
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const x = c.getContext('2d', {willReadFrequently: true});
+  x.fillStyle = '#fff'; x.fillRect(0, 0, W, H);
+  x.imageSmoothingQuality = 'high';
+  const schritt = z.gitter ? Math.max(12, z.hr) : (z.xb - z.xa);
+  for(let xs = z.xa; xs < z.xb - 0.5; xs += schritt){
+    const xe = Math.min(z.xb, xs + schritt);
+    const t0 = z.oben(xs), t1 = z.oben(xe), b0 = z.unten(xs), b1 = z.unten(xe);
+    const dx = xe - xs, hb = b0 - t0;
+    if(!(dx > 0 && hb > 0)) continue;
+    const u0 = (xs - z.xa)*f, u1 = (xe - z.xa)*f;
+    /* Affine Abbildung: (xs,t0) -> (u0,0), (xe,t1) -> (u1,0), (xs,b0) -> (u0,H) */
+    const a = (u1 - u0)/dx, b = -H*(t1 - t0)/(dx*hb), d = H/hb;
+    const sx = Math.max(0, Math.floor(xs - 2)), sy = Math.max(0, Math.floor(Math.min(t0, t1) - 2));
+    const sw = Math.min(arbeit.width, Math.ceil(xe + 2)) - sx, sh = Math.min(arbeit.height, Math.ceil(Math.max(b0, b1) + 2)) - sy;
+    if(sw <= 0 || sh <= 0) continue;
+    x.save();
+    x.beginPath(); x.rect(Math.floor(u0), 0, Math.ceil(u1 - u0) + 1, H); x.clip();
+    x.setTransform(a, b, 0, d, u0 - a*xs, -(b*xs + d*t0));
+    x.drawImage(arbeit, sx, sy, sw, sh, sx, sy, sw, sh);
+    x.restore();
+  }
+  const bild = x.getImageData(0, 0, W, H), p = bild.data;
+  const grau = new Float32Array(W*H), hist = new Array(256).fill(0);
+  for(let i = 0; i < W*H; i++){
+    const g = (p[i*4]*299 + p[i*4+1]*587 + p[i*4+2]*114)/1000;
+    grau[i] = g; hist[g | 0]++;
+  }
+  let hg = 255, n = 0;
+  for(let g = 0; g < 256; g++){ n += hist[g]; if(n >= W*H/2){ hg = g; break; } }
+  /* Hintergrundfarbe als Mittel der hellen Hälfte */
+  let rr = 0, gg = 0, bb = 0, m = 0;
+  for(let i = 0; i < W*H; i++) if(grau[i] >= hg){ rr += p[i*4]; gg += p[i*4+1]; bb += p[i*4+2]; m++; }
+  const papier = m ? [rr/m, gg/m, bb/m] : [255, 255, 255];
+  const weg = new Uint8Array(W*H);
+  for(let y = 0; y < H; y++){
+    let k = 0;
+    for(let xx = 0; xx < W; xx++) if(grau[y*W + xx] < hg - 60) k++;
+    if(k > 0.6*W) for(let dy = -1; dy <= 1; dy++) if(y + dy >= 0 && y + dy < H) for(let xx = 0; xx < W; xx++) weg[(y + dy)*W + xx] = 1;
+  }
+  /* Senkrechte Striche am Rand der Zelle - auf dem Foto laufen sie schräg,
+     deshalb von oben nach unten verfolgt, je Zeile höchstens ein Bildpunkt
+     seitwärts. Ein Strich ist, was durch mindestens 75 % der Höhe dunkel
+     bleibt; Buchstaben tun das nicht. */
+  /* gesucht wird bis eine Zellhöhe weit von jedem Rand: in den schmalen
+     Absicherungszellen von Blatt 2 steht der Strich mitten in der Zelle,
+     dicht vor "B20" */
+  const randX = Math.round(Math.min(W/2, Math.max(0.15*W, H)));
+  const dunkel = (xx, y) => xx >= 0 && xx < W && grau[y*W + xx] < hg - 50;
+  for(let x0 = 0; x0 < W; x0++){
+    if(x0 > randX && x0 < W - randX) continue;
+    let xx = x0, k = 0;
+    const pfad = [];
+    for(let y = 0; y < H; y++){
+      let best = null;
+      [0, -1, 1].forEach(function(d){ if(best === null && dunkel(xx + d, y)) best = xx + d; });
+      if(best !== null){ xx = best; k++; }
+      pfad.push(xx);
+    }
+    if(k >= 0.75*H) pfad.forEach(function(px, y){
+      for(let d = -2; d <= 2; d++) if(px + d >= 0 && px + d < W) weg[y*W + px + d] = 1;
+    });
+  }
+  let geloescht = 0;
+  for(let i = 0; i < W*H; i++) if(weg[i] && grau[i] < hg - 25){
+    p[i*4] = papier[0]; p[i*4+1] = papier[1]; p[i*4+2] = papier[2]; geloescht++;
+  }
+  x.putImageData(bild, 0, 0);
+  const pad = Math.round(0.5*H);
+  const aus = document.createElement('canvas');
+  aus.width = W + 2*pad; aus.height = H + 2*pad;
+  const ax = aus.getContext('2d');
+  ax.fillStyle = 'rgb(' + papier.map(Math.round).join(',') + ')';
+  ax.fillRect(0, 0, aus.width, aus.height);
+  ax.drawImage(c, pad, pad);
+  return {canvas: aus, faktor: f, pad, H, W, geloescht};
+}
+
+async function zellenLesen(arbeit, geo){
+  const plan = zellenPlanen(geo, arbeit.width);
+  const bericht = {zellen: [], grund: plan.grund || '', art: geo.gitter ? 'linien' : 'zeilengesetz',
+                   basis: geo.gitter ? (geo.basis || 0) : (geo.raster ? geo.raster.von : 0)};
+  const schwelle = parseFloat(document.getElementById('schwelle').value)*100;
+  for(const z of plan.zellen){
+    const b = zelleZeichnen(arbeit, z);
+    let erg2;
+    try{ erg2 = await dienst.recognize(b.canvas, {noCache: true}); }catch(e){ continue; }
+    const w = holeWoerter(erg2).filter(function(q){
+      const my = (q.bbox.y0 + q.bbox.y1)/2;
+      return q.confidence >= schwelle && my > b.pad - 0.2*b.H && my < b.pad + 1.2*b.H;
+    }).sort((p, q) => p.bbox.x0 - q.bbox.x0);
+    const neu = w.map(q => q.text).join(' ').replace(/\s+/g, ' ').trim();
+    const confNeu = w.length ? w.reduce((s, q) => s + q.confidence, 0)/w.length : 0;
+    const rolle = (geo.rollen && geo.rollen[z.spalte]) || 'bezeichnung';
+    const alt = saeubern(z.text);
+    const e = {r: z.r, spalte: z.spalte, rolle, text: z.text, conf: z.conf, neu, confNeu, streifen: b.canvas,
+               guteAlt: lesegute(alt, rolle), guteNeu: lesegute(neu, rolle), uebernommen: false,
+               kaesten: z.woerter.map(q => ({x0: q.bbox.x0, y0: q.bbox.y0, x1: q.bbox.x1, y1: q.bbox.y1}))};
+    /* Übernommen, wenn besser deutbar - bei gleicher Güte nur, wenn auch
+       mindestens so sicher gelesen */
+    if(neu && neu !== alt && (e.guteNeu > e.guteAlt || (e.guteNeu === e.guteAlt && confNeu >= z.conf))) e.uebernommen = true;
+    if(e.uebernommen && !z.woerter.length){
+      /* leeres Feld: der neue Kasten sitzt, wo der Text im Ausschnitt stand */
+      const ua = Math.min.apply(null, w.map(q => q.bbox.x0)), ub = Math.max.apply(null, w.map(q => q.bbox.x1));
+      const xa = z.xa + (ua - b.pad)/b.faktor, xb = z.xa + (ub - b.pad)/b.faktor, xm = (xa + xb)/2;
+      const ym = (z.oben(xm) + z.unten(xm))/2;
+      e.kasten = {x0: xa, x1: xb, y0: ym - 0.3*z.hr, y1: ym + 0.3*z.hr};
+    }
+    bericht.zellen.push(e);
+  }
+  return bericht;
+}
+
+function markiereGelesen(erg, zellen){
+  const kaesten = [];
+  zellen.forEach(z => z.kaesten.forEach(k => kaesten.push(k)));
+  (erg.lines || []).forEach(function(zeile){
+    const liste = Array.isArray(zeile) ? zeile : (zeile && zeile.words) ? zeile.words : [zeile];
+    liste.forEach(function(w){
+      const b = w && (w.box || w.bbox || w.rect);
+      if(!b) return;
+      const x0 = (b.x !== undefined) ? b.x : b.x0, y0 = (b.y !== undefined) ? b.y : b.y0;
+      if(kaesten.some(k => Math.abs(k.x0 - x0) < 0.01 && Math.abs(k.y0 - y0) < 0.01)) w.zellGelesen = true;
+    });
+  });
+}
+
 /* Paddle liefert lines: Liste von Zeilen, je Zeile eine Liste von Wörtern
    mit box {x,y,width,height} und confidence 0..1. Wir bringen das auf die
    Form, mit der die Logik aus ocr-test v0.6 arbeitet. */
@@ -2933,7 +3286,7 @@ function holeWoerter(erg){
         confidence: (w.confidence !== undefined ? w.confidence : 1) * 100,
         zeile: zi,
         behalten: true,
-        vorher: w.vorher, confVorher: w.confVorher
+        vorher: w.vorher, confVorher: w.confVorher, zellGelesen: w.zellGelesen || w.vorher !== undefined
       });
     });
   });
@@ -3113,10 +3466,32 @@ function verarbeite(erg, arbeit, winkel, leseDauer, nachleseBericht){
     ziel.appendChild(gebaut.knoten);
     tabellenText = gebaut.text;
     letzteReihen = gebaut.ist || null;
+    if(gebaut.klammerBericht) mess.push('Klammern zusammengefasst: ' + gebaut.klammerBericht.join('; '));
     /* v0.27: ergänzen statt ersetzen - sonst fällt der gefundene Nummernstreifen
        heraus (daran scheiterten v0.23 und v0.26 auf dem Münch-Blatt) */
     rueck = Object.assign(rueck, {zweifel: gebaut.zweifel || [],
              hoehe: (gitter && gitter.hoehe) || (raster && raster.hoehe) || nrZ.hoehe || 40});
+    /* v0.30: was die Zellenlesung braucht - Zeilen, Spalten, Rollen */
+    rueck.geometrie = {gitter, basis, raster, grenzen, teile, rollen: rv.rollen, hoehe: rueck.hoehe};
+
+    if(letzterZellenBericht){
+      const b = letzterZellenBericht;
+      if(b.aus) mess.push('Zellenlesung: ' + b.aus);
+      else if(!b.zellen.length) mess.push('Zellenlesung: nichts gelesen – ' + (b.grund || 'keine beschriebenen Zeilen'));
+      else {
+        const ueb = b.zellen.filter(z => z.uebernommen).length;
+        const gleich = b.zellen.filter(z => z.neu === saeubern(z.text)).length;
+        mess.push('Zellenlesung: ' + b.zellen.length + ' Zellen einzeln gelesen (Zeilen aus ' +
+                  (b.art === 'linien' ? 'den Linien' : 'dem Zeilengesetz') + '), ' + gleich + ' gleich gelesen, ' +
+                  ueb + ' übernommen' + (b.dauer ? ', ' + (b.dauer/1000).toFixed(1) + ' s' : ''));
+        b.zellen.forEach(function(z){
+          if(z.neu === saeubern(z.text)) return;
+          mess.push('   Zeile ' + (z.r - b.basis + 1) + ', ' + z.rolle + ': „' + (saeubern(z.text) || '–') + '" (' +
+                    Math.round(z.conf) + ' %, Güte ' + z.guteAlt.toFixed(1) + ') -> „' + (z.neu || '–') + '" (' +
+                    Math.round(z.confNeu) + ' %, Güte ' + z.guteNeu.toFixed(1) + ')' + (z.uebernommen ? '' : ' – verworfen'));
+        });
+      }
+    }
 
     if(nachleseBericht && nachleseBericht.length){
       const ueb = nachleseBericht.filter(b => b.uebernommen).length;
@@ -3824,7 +4199,13 @@ function aufsSchema(r){
   let b = bez, raeume = [];
   if(r.ort && !r.ort.leer){
     const rest = [];
-    r.ort.text.split(/[,\s]+/).filter(Boolean).forEach(w => (istRaum(w) ? raeume : rest).push(w));
+    /* v0.30: Räume über die Kürzeltabelle - sonst bleibt "Bad" stehen, wenn
+       die Ortsspalte außer dem Raum noch etwas trägt (Münch, Zeile 11) */
+    r.ort.text.split(/[,\s]+/).filter(Boolean).forEach(function(w){
+      if(!istRaum(w)){ rest.push(w); return; }
+      const ab = ABKUERZUNGEN[w.toLowerCase()];
+      raeume.push(ab && ORTE.indexOf(ab) >= 0 ? ab : w);
+    });
     if(rest.length) b = (b ? b + ' ' : '') + rest.join(' ');
   }
   b = b.replace(/\s*\/\s*/g, ', ').replace(/\s+/g, ' ').trim();
@@ -3999,6 +4380,7 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
         feld.nachgelesen = nachgelesen.map(w => w.vorher).join(' ');
         return;
       }
+      if(zl.woerter.some(w => w.zellGelesen)) return;
       const conf = zl.conf || 0;
       if(!(conf < 85 || feld.unklar || feld.herkunft === 'frei' || feld.herkunft === 'unklar')) return;
       let x0 = Infinity, x1 = -Infinity;
@@ -4101,6 +4483,7 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
   const koerper = document.createElement('tbody');
   const breite = 2 + (zeigeOrt?1:0) + (zeigeSich?1:0);
 
+  const klammerBericht = klammernZusammenfassen(reihen);
   reihen.forEach(aufsSchema);
 
   reihen.forEach(function(r, idx){
@@ -4196,7 +4579,37 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
   /* v0.28: die fertigen Zeilen für den Abgleich mit der Musterlösung */
   const ist = reihen.map(r => ({nr: r.n.text || '', bez: r.bez.leer ? '' : r.bez.text,
     ort: (r.ort && !r.ort.leer) ? r.ort.text : '', sich: (r.sich && !r.sich.leer) ? r.sich.text : ''}));
-  return {knoten: huelle, text, zuB, zuO, zweifel, ist};
+  return {knoten: huelle, text, zuB, zuO, zweifel, ist, klammerBericht};
+}
+
+/* v0.31: gemessene Klammern zu einem Eintrag zusammenfassen - der Vorschlag
+   aus v0.28, am Münch-Blatt. Die Nummernspalte misst die Klammerstriche seit
+   v0.28 richtig (1–2, 5–6, 9–10, 13–15, 16–18, 19–20), der Text steht aber
+   auf einer Einzelzeile der Gruppe: "FI-Schutzschalter" bei 1, "Hauptschalter"
+   bei 14, "E-Herd" bei 17. Eine Klammer ist ein Gerät über mehrere Nummern -
+   im E-Assistenten ein Eintrag mit mehreren Teilungseinheiten. Der Inhalt
+   kommt aus der Zeile der Gruppe, die Text trägt; die übrigen Zeilen der
+   Gruppe fallen weg. Tragen mehrere Zeilen Text, bleibt alles, wie es ist -
+   dann ist es keine Klammer über einem Gerät. */
+function klammernZusammenfassen(reihen){
+  const b = letzterNummernBericht;
+  if(!b || b.fehler || !b.uebernommen || !b.klammern || !b.klammern.length) return null;
+  const bericht = [];
+  b.klammern.forEach(function(k){
+    const m = /^(\d+)\D+(\d+)$/.exec(k);
+    if(!m) return;
+    const von = +m[1], bis = +m[2];
+    const gruppe = reihen.filter(r => r.n && r.n.a !== null && r.n.a !== undefined && r.n.a === r.n.b && r.n.a >= von && r.n.a <= bis);
+    if(gruppe.length < 2){ bericht.push(k + ': nur ' + gruppe.length + ' Zeile gefunden, belassen'); return; }
+    const voll = gruppe.filter(r => !r.bez.leer || !r.ort.leer || !r.sich.leer);
+    if(voll.length > 1){ bericht.push(k + ': ' + voll.length + ' Zeilen mit Text, belassen'); return; }
+    const ziel = voll[0] || gruppe[0];
+    ziel.n.text = von + '–' + bis; ziel.n.a = von; ziel.n.b = bis;
+    ziel.hinweis = '';
+    gruppe.forEach(function(r){ if(r !== ziel) reihen.splice(reihen.indexOf(r), 1); });
+    bericht.push(k + ': ' + gruppe.length + ' Zeilen, Inhalt aus ' + (voll.length ? 'der beschriebenen' : 'keiner – leer'));
+  });
+  return bericht;
 }
 
 /* Farbe nach Herkunft: gruen korrigiert, bernstein uebernommen ohne
