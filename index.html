@@ -1,7 +1,14 @@
 <!DOCTYPE html>
 <!--
   PaddleOCR-Test · Verteilerbeschreibung
-  v0.31 · 25.09.2026
+  v0.32 · 25.09.2026
+
+  v0.32: zwei zusammengeklebte Bezeichnungen werden als Paar getrennt
+  ("LichtSteckdosen" -> "Licht/Steckdosen" -> "Licht, Steckdosen"), wie zwei
+  Orte schon bisher. Anlass: der iPhone-Durchlauf mit v0.31 - die
+  Zellenlesung las auf Blatt 2 in Zeile 47 "LichtSteckdosen BadWC", daraus
+  wurde "Licht Steckdosen" (50 statt 51 von 53; am Rechner kam der
+  Schraegstrich mit).
 
   v0.31: Klammern zusammenfassen und eine Ziffer als Platzhalter. Die seit
   v0.28 gemessenen Klammern der Nummernspalte (Muench: 1-2, 5-6, 9-10,
@@ -666,7 +673,7 @@ pre.abgleich.gut{background:#EAF5DC;border-color:#8FBE36}
 
   <header>
     <h1>PaddleOCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.31 · 25.09.2026</span>
+    <span class="ver">v0.32 · 25.09.2026</span>
   </header>
 
   <div class="karte">
@@ -838,7 +845,7 @@ const MODELLE = {
   latin: {name:'v5 lateinisch',  konstante:'V5_LATIN_MOBILE_MODEL'}
 };
 
-const VERSION = 'v0.31 · 25.09.2026';
+const VERSION = 'v0.32 · 25.09.2026';
 
 /* ==================== Schrittliste ==================== */
 
@@ -3975,7 +3982,10 @@ function sicherungDeuten(roh){
    wenn BEIDE Teile genau auf einer Liste stehen - "Steckdosenring" bleibt
    ganz, weil "ring" auf keiner steht. Zwei Orte werden mit Schrägstrich
    verbunden, Bezeichnung und Ort mit Leerzeichen, die Bezeichnung zuerst:
-   aus "Badbeleuchtung" wird "beleuchtung Bad". */
+   aus "Badbeleuchtung" wird "beleuchtung Bad". v0.32: zwei Bezeichnungen
+   ebenfalls mit Schrägstrich - sie sind ein Paar. Das iPhone las auf Blatt 2
+   in Zeile 47 "LichtSteckdosen BadWC", daraus wurde "Licht Steckdosen" statt
+   "Licht, Steckdosen". */
 function listenwort(w){
   const l = w.toLowerCase();
   const ort = ORTE.some(x => x.toLowerCase() === l);
@@ -3993,6 +4003,7 @@ function klebeLoesen(text){
       if(!ka || !kb) continue;
       if(ka.ort && kb.ort) return a + '/' + b + rest;
       if(ka.ort && !kb.ort) return b + ' ' + a + rest;
+      if(ka.bez && kb.bez && !ka.ort && !kb.ort) return a + '/' + b + rest;
       return a + ' ' + b + rest;
     }
     return t;
