@@ -1,7 +1,52 @@
 <!DOCTYPE html>
 <!--
   PaddleOCR-Test · Verteilerbeschreibung
-  v0.34 · 25.09.2026
+  v0.38 · 25.09.2026
+
+  v0.38: die zurückgehaltenen Blätter, blind mit v0.37 geprüft: IMG_6635
+  13/18, IMG_6744 4/13 - danach Lernblätter. Kürzel mit Punkt kleben am
+  nächsten Wort ("Std.Küche", "Bel.Flur", "Std.+ Bel.Bad") und werden
+  getrennt, "+" und "/" zählen dann als eigene Trenner; Spülmaschine auch
+  verlesen ("Spiülmaschine"). Ein Bereich vorn ("21-24 Fehlerstromschutz-
+  schalter ...") wird wie eine Nummer abgetrennt; die Beschreibung hinter
+  dem FI ("für Steckdosen (15-20)") ist wörtlich der Ort. Ein Hinweis unter
+  einem Eintrag ("Prüftaste ... monatlich drücken!!") setzt ihn nicht fort.
+
+  v0.37: Hofmann-Blatt (Liste ohne Linien, dicht gesetzt). Die Bibliothek
+  nimmt in der Karte der Texterkennung jeden Wert über null als Text, dicht
+  stehende Zeilen verschmelzen zu Kästen über viele Zeilen, und die zeilen-
+  weise Lesung macht daraus Unsinn - 30 von 38 Zeilen fehlten. Liegt ein
+  Kasten über drei Zeilen hoch, wird ein zweites Mal gelesen (Notlesung):
+  Karte mit Schwelle 0,3 wie im Original, hohe Kästen an den Zeilen der
+  Nachbarn geteilt. Genommen wird sie nur mit deutlichem Vorsprung; Münch
+  und Blatt 2 behalten ihre erste Lesung. Deutung: das Komma trennt auch
+  zwei Bezeichnungen, "Essbereich rechts" ist ein Ort, "allgem." behält
+  seinen Punkt. Fehlerbehebung an v0.36: dicke Linien (7-8 Punkte) nur, wenn
+  sie über 60 % des Bildes laufen - Dewitz verlor sonst in einer Aufbereitung
+  den FI an eine Textzeile, die als Linie galt.
+
+  v0.36: Jüngling-Blatt (Tabelle mit Schutzgerät und Hinweisen, starke
+  Perspektive). Findet sich keine Textzeile, weil die Buchstaben die
+  Tabellenlinien berühren, kommt der Fluchtpunkt aus den gedruckten Linien -
+  nur bei starker Perspektive (näher als vier Bildbreiten), sonst bleibt es
+  beim Drehen. Nummer und Text in einem Kasten ("1Herd", "13|Fi-Schutz-
+  schalter") werden getrennt, die Grenze Nummer/Text darf schräg laufen. Der
+  Kopfschnitt nimmt die oberste Nummer mit Nachfolgerin und liegt höchstens
+  0,8 Zeilen über ihrer Mitte. Fette Linien bis 8 Punkte, eine dritte
+  Linienspur, bei gleichem Befund gewinnt die Spur mit weniger Eingriffen.
+  "Automat B16" ist B 16 A, "25A/0,03A bitte monatlich prüfen" ein FI ohne
+  den Hinweis. Ein Ort mit Komma trennt ein Paar ("Waschmaschine Bad,
+  Spiegelschrank"), Räume nur einmal, "Kind 2" auch in der Bezeichnung.
+  Unter drei Leerzeilen ist Text ohne Nummer der Fuß des Blattes.
+
+  v0.35: Deutung nach Jeans Festlegungen vom 25.09.2026. Aufeinanderfolgende
+  Einzelnummern mit demselben mehrpoligen Gerät (Überspannungsableiter, E-Herd,
+  Hauptschalter, FI) werden ein Eintrag über mehrere Teilungseinheiten - Blatt 2
+  E-Herd 37-39 und FI 45-46; gemessene Klammern bleiben getrennt (Dewitz 2).
+  "SD" und Verwandte werden "Steckdose(n)", wo Einzahl oder Mehrzahl nicht
+  feststeht; vor einem einzelnen Gerät "Steckdose". Waschmaschine bekommt ihre
+  Steckdose vorangestellt. Nummerierte Räume ("Kind 2", "Zimmer 1 und 2"),
+  RCD/RCB als FI, Spülmaschine als Geschirrspüler.
 
   v0.34: Wohnungsverteiler. Die Kreuzprobe der Linien mit der Nummernspalte
   entfernt keine Linien mehr, wo die uebersprungenen Zeilen gleichmaessig
@@ -704,7 +749,7 @@ pre.abgleich.gut{background:#EAF5DC;border-color:#8FBE36}
 
   <header>
     <h1>PaddleOCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.34 · 25.09.2026</span>
+    <span class="ver">v0.38 · 25.09.2026</span>
   </header>
 
   <div class="karte">
@@ -864,11 +909,13 @@ const BEZEICHNUNGEN = ['Licht','Steckdose','Steckdosen','Beleuchtung','E-Herd','
   'Überspannungsableiter','Hauptschalter',
   'Stromstoßschalter','Trafo','CEE-Steckdose','Klingel','Durchlauferhitzer','Warmwasser',
   'Boiler','Heizung','Rollladen','Arbeitsfläche','Arbeitsplatte','SD','Außensteckdose','Reserve','Zuleitung','Garage',
-  'Relais'];
+  'Relais','Steckdose(n)','Dunstabzugshaube','Abzugshaube','Umlufthaube','Spiegelschrank'];
 
 const ORTE = ['Bad','Badezimmer','Küche','Flur','Diele','Wohnzimmer','Schlafzimmer','Kinderzimmer',
   'Esszimmer','Büro','Balkon','Terrasse','Keller','Kammer','Speisekammer','Abstellraum',
-  'Hauswirtschaftsraum','Wohnung','WC','Gäste-WC','Garage','Dachboden'];
+  'Hauswirtschaftsraum','Wohnung','WC','Gäste-WC','Garage','Dachboden',
+  /* v0.35 (Jean, 25.09.2026): Teilbereiche und Nischen sind Orte */
+  'Essbereich','Nische'];
 
 const MODELLE = {
   tiny:  {name:'v6 tiny',        konstante:null},
@@ -876,7 +923,7 @@ const MODELLE = {
   latin: {name:'v5 lateinisch',  konstante:'V5_LATIN_MOBILE_MODEL'}
 };
 
-const VERSION = 'v0.34 · 25.09.2026';
+const VERSION = 'v0.38 · 25.09.2026';
 
 /* ==================== Schrittliste ==================== */
 
@@ -964,7 +1011,184 @@ async function starteDienst(modellId){
   dienst = new Sdk(opt);
   await dienst.initialize();
   aktivesModell = modellId;
+  schwelleNachruesten();
   return vermerk;
+}
+
+/* v0.37: Schwelle der Wahrscheinlichkeitskarte. Die Bibliothek sucht Text-
+   kästen in der Karte der Texterkennung schon ab einem Wert über null; das
+   Original (PaddleOCR, det_db_thresh) schneidet bei 0,3. Ohne die Schwelle
+   verschmelzen dicht stehende Zeilen zu einem Block, und der geht ganz
+   verloren - auf dem Hofmann-Blatt fehlten so 30 von 38 Zeilen. Nachgerüstet
+   wird an runInference, die die Karte liefert; findet sich die Stelle nicht
+   (andere Fassung der Bibliothek), bleibt alles wie es war und der Bericht
+   sagt es. Schwelle und Teilen gelten nur für eine zweite Lesung ("Not-
+   lesung"): für alle Blätter eingeschaltet, kostete die Schwelle Münch acht
+   Zeilen - seine Klammern und die Nummernspalte brauchen die großen Kästen. */
+const KARTEN_SCHWELLE = 0.3;
+let notlesungBericht = '';
+let kaestenGeteilt = [], notlesung = false, notlesungMoeglich = false, hoheKaestenZahl = 0;
+/* Kästen über drei Zeilenhöhen - nur dann lohnt die zweite Lesung */
+function hoheKaestenZaehlen(kaesten){
+  if(!Array.isArray(kaesten) || kaesten.length < 5) return 0;
+  const hoehen = kaesten.map(k => k.height).sort((a, b) => a - b);
+  const h = hoehen[Math.floor(hoehen.length/2)];
+  return kaesten.filter(k => k.height > 3*h).length;
+}
+function hoheKaestenTeilen(bild, kaesten){
+  if(!bild || !bild.getContext || !Array.isArray(kaesten) || kaesten.length < 5) return kaesten;
+  const hoehen = kaesten.map(k => k.height).sort((a, b) => a - b);
+  const h = hoehen[Math.floor(hoehen.length/2)];
+  if(!(h > 5)) return kaesten;
+  const ctx = bild.getContext('2d');
+  const normal = kaesten.filter(k => k.height < 2.2*h);
+  const raus = [], stuecke = [];
+  kaesten.forEach(function(k){
+    if(k.height < 2.2*h){ raus.push(k); return; }
+    const x0 = Math.max(0, Math.floor(k.x)), y0 = Math.max(0, Math.floor(k.y));
+    const w = Math.min(bild.width - x0, Math.ceil(k.width)), hh = Math.min(bild.height - y0, Math.ceil(k.height));
+    if(w < 2 || hh < 2){ raus.push(k); return; }
+    const d = ctx.getImageData(x0, y0, w, hh).data;
+    const grau = new Uint8Array(w*hh);
+    let hell = 0;
+    for(let i = 0, j = 0; i < w*hh; i++, j += 4){ grau[i] = (d[j]*299 + d[j+1]*587 + d[j+2]*114)/1000; if(grau[i] > hell) hell = grau[i]; }
+    const tinte = (x, y) => grau[y*w + x] < hell - 70;
+    /* Tinte eines Bandes, in Gruppen nach Lücken von mehr als einer Zeilenhöhe */
+    const gruppen = function(ya, yb){
+      const sp = new Uint16Array(w);
+      for(let y = Math.max(0, ya); y < Math.min(hh, yb); y++) for(let x = 0; x < w; x++) if(tinte(x, y)) sp[x]++;
+      const g = []; let an = -1, letzte = -1e9;
+      for(let x = 0; x < w; x++){
+        if(sp[x] < 2) continue;
+        if(an < 0 || x - letzte > h){ if(an >= 0) g.push([an, letzte]); an = x; }
+        letzte = x;
+      }
+      if(an >= 0) g.push([an, letzte]);
+      return g;
+    };
+    /* 1. Zeilen aus den Nachbarn: Kästen daneben, deren Mitte im hohen Kasten
+       liegt, geben die Zeilen vor (Hofmann: der Text rechts neben den Nummern) */
+    const mitten = normal.filter(n => (n.x + n.width > k.x + k.width + h || n.x < k.x - h) &&
+                                      n.y + n.height/2 > k.y && n.y + n.height/2 < k.y + k.height)
+                         .map(n => ({y: n.y + n.height/2, rechts: n.x + n.width/2 > k.x + k.width/2,
+                                     rand: n.x + n.width/2 > k.x + k.width/2 ? n.x : n.x + n.width}))
+                         .sort((p, q) => p.y - q.y);
+    const zeilen = [];
+    mitten.forEach(m => { if(!zeilen.length || m.y - zeilen[zeilen.length-1].y > 0.5*h) zeilen.push(m); });
+    let teile = [];
+    /* Die Spalte im hohen Kasten, aus schmalen Kästen darüber oder darunter,
+       die im selben waagerechten Bereich liegen - auf dem Hofmann-Blatt die
+       Nummern 01 bis 12. Die Tinte taugt dafür nicht: der Schatten am
+       gelochten Rand ist so dunkel wie die Schrift. */
+    const spalte = normal.filter(n => n.x >= k.x - 0.5*h && n.x + n.width <= k.x + k.width + 0.5*h && n.width < 4*h &&
+                                      (n.y + n.height <= k.y + 0.5*h || n.y >= k.y + k.height - 0.5*h));
+    if(zeilen.length >= 2 && spalte.length >= 2){
+      const xa = median(spalte.map(n => n.x)), xb = median(spalte.map(n => n.x + n.width));
+      zeilen.forEach(function(z){
+        if(z.rechts ? xb > z.rand : xa < z.rand) return;
+        teile.push({x: xa, y: Math.max(0, z.y - 0.6*h), width: xb - xa, height: 1.2*h});
+      });
+    }
+    if(zeilen.length >= 2 && teile.length < 2){
+      teile = [];
+      zeilen.forEach(function(z){
+        const ya = Math.round(z.y - y0 - 0.45*h), yb = Math.round(z.y - y0 + 0.45*h);
+        /* nur Tinte vor dem Nachbarn (der hohe Kasten reicht auf dem
+           Hofmann-Blatt bis in den Text hinein), davon die Gruppe auf seiner
+           Seite - nicht der gelochte Rand */
+        const g = gruppen(ya, yb).filter(gg => z.rechts ? x0 + gg[1] < z.rand - 0.2*h : x0 + gg[0] > z.rand + 0.2*h);
+        if(!g.length) return;
+        const gr = z.rechts ? g[g.length-1] : g[0];
+        if(gr[1] - gr[0] < 0.15*h) return;
+        teile.push({x: Math.max(0, x0 + gr[0] - 0.4*h), y: Math.max(0, z.y - 0.6*h),
+                    width: (gr[1] - gr[0]) + 0.8*h, height: 1.2*h});
+      });
+    }
+    /* 2. sonst das Schwärzungsprofil */
+    if(teile.length < 2){
+      teile = [];
+      const prof = new Float32Array(hh);
+      for(let y = 0; y < hh; y++){ let n = 0; for(let x = 0; x < w; x++) if(tinte(x, y)) n++; prof[y] = n; }
+      const maxP = Math.max.apply(null, Array.from(prof));
+      const leer = maxP*0.04;
+      let anf = -1;
+      for(let y = 0; y <= hh; y++){
+        const t = y < hh && prof[y] > leer;
+        if(t && anf < 0) anf = y;
+        if(!t && anf >= 0){
+          if(y - anf >= 0.3*h){
+            const g = gruppen(anf, y);
+            if(g.length){
+              const zh = y - anf, xa = g[0][0], xb = g[g.length-1][1];
+              teile.push({x: Math.max(0, x0 + xa - 0.5*zh), y: Math.max(0, y0 + anf - 0.35*zh),
+                          width: xb - xa + zh, height: 1.7*zh});
+            }
+          }
+          anf = -1;
+        }
+      }
+    }
+    if(teile.length < 2){
+      /* nicht zu teilen: über drei Zeilen hoch liest die Erkennung darin
+         ohnehin nichts, verdirbt aber die Nachbarn - er fällt weg */
+      if(k.height > 3*h) kaestenGeteilt.push(Math.round(k.width) + '×' + Math.round(k.height) + ' verworfen (' + zeilen.length + ' Nachbarzeilen)');
+      else raus.push(k);
+      return;
+    }
+    teile.forEach(t => stuecke.push({x: t.x, y: t.y, width: Math.min(bild.width - t.x, t.width), height: Math.min(bild.height - t.y, t.height)}));
+    kaestenGeteilt.push(Math.round(k.width) + '×' + Math.round(k.height) + ' in ' + teile.length + (zeilen.length >= 2 && teile.length ? ' (Zeilen der Nachbarn)' : ''));
+  });
+  /* Stücke, deren Mitte schon in einem Kasten liegt, sind doppelt - hohe
+     Kästen überlappen sich, und neben ihnen liegen oft schon die Nummern */
+  const ueberlapp = (a, b) => {
+    const w = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x), hh = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+    if(w <= 0 || hh <= 0) return 0;
+    return w*hh / Math.min(a.width*a.height, b.width*b.height);
+  };
+  /* doppelt ist ein Stück erst, wenn es zur Hälfte in einem Kasten liegt -
+     auf dem Hofmann-Blatt ragt der Kasten der 46 in die Zeile 45 */
+  stuecke.forEach(t => { if(!raus.some(k => ueberlapp(t, k) > 0.5)) raus.push(t); });
+  return raus;
+}
+
+let kartenSchwelleStand = 'nicht geprüft';
+function schwelleNachruesten(){
+  try{
+    let p = dienst && dienst.detector ? Object.getPrototypeOf(dienst.detector) : null;
+    while(p && !Object.prototype.hasOwnProperty.call(p, 'runInference')) p = Object.getPrototypeOf(p);
+    if(!p){ kartenSchwelleStand = 'nicht nachrüstbar (Stelle in der Bibliothek nicht gefunden)'; return; }
+    if(!p.__samSchwelle){
+      const alt = p.runInference;
+      p.runInference = async function(){
+        const d = await alt.apply(this, arguments);
+        if(d && notlesung && KARTEN_SCHWELLE > 0){ for(let i = 0; i < d.length; i++) if(d[i] < KARTEN_SCHWELLE) d[i] = 0; }
+        return d;
+      };
+      p.__samSchwelle = true;
+    }
+    kartenSchwelleStand = 'Schwelle ' + KARTEN_SCHWELLE;
+    /* v0.37: zu hohe Kästen teilen. Auch mit Schwelle legt die Karte auf dem
+       Hofmann-Blatt die Nummern 12 bis 24 übereinander in einen Kasten von
+       452 × 636 Punkten. Die Bibliothek liest zeilenweise und bringt alle
+       Kästen einer Zeile auf dieselbe Höhe - der eine hohe Kasten machte so
+       jede Zeile, die er berührt, unlesbar ("RCB 13-20" wurde "RB 128").
+       Geteilt wird am Schwärzungsprofil des Bildes in die Textzeilen darin. */
+    let q = Object.getPrototypeOf(dienst.detector);
+    while(q && !Object.prototype.hasOwnProperty.call(q, 'run')) q = Object.getPrototypeOf(q);
+    if(q && !q.__samTeilen){
+      const altRun = q.run;
+      q.run = async function(bild){
+        const kaesten = await altRun.apply(this, arguments);
+        try{
+          if(!notlesung){ hoheKaestenZahl = hoheKaestenZaehlen(kaesten); return kaesten; }
+          return hoheKaestenTeilen(bild, kaesten);
+        }catch(e){ return kaesten; }
+      };
+      q.__samTeilen = true;
+    }
+    if(q) kartenSchwelleStand += ' und Teilen hoher Kästen';
+    notlesungMoeglich = !!q;
+  }catch(e){ kartenSchwelleStand = 'nicht nachrüstbar (' + e.message + ')'; }
 }
 
 document.getElementById('start').addEventListener('click', async function(){
@@ -1259,6 +1483,38 @@ function entzerrenNachFluchtpunkt(canvas, vp){
   return aus;
 }
 
+/* v0.36: Fluchtpunkt aus den gedruckten Linien. Auf einem Blatt mit
+   Tabellenlinien berühren die Buchstaben die Linien, die Tintenstücke von
+   textzeilenMessen wachsen zu Gebilden über mehrere Zeilen und fallen durch -
+   auf dem Jüngling-Blatt blieben 2 Textzeilen, das Blatt wurde nur um -5°
+   gedreht, obwohl die Zeilen oben um 6° und unten um 4° steigen. Die Linien
+   selbst sind die besseren Stücke: lang, gerade, und sie laufen genau auf den
+   Fluchtpunkt zu. Gerade gezogen wird jede Linie mit ihrer Ausgleichsgeraden. */
+function linienStuecke(canvas){
+  const b = halbBild(canvas);
+  let beste = [];
+  [linienAus(spurOtsu(b), b), linienAus(spurLokal(b, 10), b)].forEach(function(L){
+    if(L.length > beste.length) beste = L;
+  });
+  const st = [];
+  beste.forEach(function(L){
+    const n = L.xs.length;
+    let sx = 0, sy = 0, sxx = 0, sxy = 0;
+    for(let i=0;i<n;i++){ sx += L.xs[i]; sy += L.ys[i]; sxx += L.xs[i]*L.xs[i]; sxy += L.xs[i]*L.ys[i]; }
+    const nen = n*sxx - sx*sx;
+    if(Math.abs(nen) < 1e-9) return;
+    const a = (n*sxy - sx*sy)/nen, bb = (sy - a*sx)/n;
+    /* gebogene oder geknickte Züge (zwei Linien an einer Kreuzung
+       verschmolzen) taugen nicht als Richtung */
+    let rest = 0;
+    for(let i=0;i<n;i++) rest += Math.abs(L.ys[i] - (a*L.xs[i] + bb));
+    if(rest/n > 3) return;
+    const xm = (L.x0 + L.x1)/2;
+    st.push({a, xm, ym: a*xm + bb, w: L.x1 - L.x0});
+  });
+  return st;
+}
+
 let letzteEntzerrung = null;
 
 /* ==================== Abgleich mit der Musterlösung (v0.28) ====================
@@ -1416,12 +1672,14 @@ function spaltenFinden(woerter, breite){
   return null;
 }
 
-function zuordnen(woerter, g0, g1){
+function zuordnen(woerter, g0, g1, neig){
   const gruppen = [[],[],[]];
   woerter.forEach(w => {
     if(!w.bbox) return;
     const mx = (w.bbox.x0 + w.bbox.x1)/2;
-    gruppen[mx < g0 ? 0 : (mx < g1 ? 1 : 2)].push(w);
+    /* v0.36: die Grenze Nummer/Text darf schräg laufen (neig) */
+    const gy = neig ? g0 + neig.k*((w.bbox.y0 + w.bbox.y1)/2 - neig.y) : g0;
+    gruppen[mx < gy ? 0 : (mx < g1 ? 1 : 2)].push(w);
   });
   return gruppen;
 }
@@ -1602,7 +1860,14 @@ function linienAus(dunkel, b){
        waagerechten übrig - auf Jeans Blatt blieben 11 von 52.
        Geprüft wird stattdessen die Dünne: eine Tabellenlinie ist je Spalte ein
        paar Bildpunkte hoch, ein Textblock nicht. */
-    if(median(dick) > 6) continue;
+    /* v0.36: 8 statt 6 - die fett gedruckten Kopflinien des Jüngling-Blattes
+       sind im halben Bild 4 bis 5 Punkte dick, gedehnt 7; ohne sie fehlte dem
+       Raster die Zeile 1 und die Kreuzprobe fand die Nummer außerhalb.
+       v0.37: dicker als 6 nur, wenn die Linie über 60 % des Bildes läuft -
+       sonst hielt die Spur auf Dewitz (Pillow bilinear) die lange Textzeile
+       "Fehlerstromschutzschalter Stromkreis 5/ 6" für eine Linie. */
+    const md = median(dick);
+    if(md > 8 || (md > 6 && xs[xs.length-1] - xs[0] < 0.6*2*W)) continue;
     linien.push({xs, ys, x0:xs[0], x1:xs[xs.length-1],
                  mitte: ys.reduce((a,v)=>a+v,0)/ys.length});
   }
@@ -1693,7 +1958,11 @@ function linienFinden(canvas, nrZeilen){
   const anker = nrZeilen.map(function(z){ return {x:mitteX(z), y:z.mitte}; });
   const proben = [
     {name:'Otsu', linien: linienAus(spurOtsu(b), b)},
-    {name:'lokales Maximum', linien: linienAus(spurLokal(b, 10), b)}
+    {name:'lokales Maximum', linien: linienAus(spurLokal(b, 10), b)},
+    /* v0.36: körniges Foto (Jüngling-Blatt): mit Abstand 10 ist dort jede
+       Papierfaser dunkel, keine Linie bleibt dünn genug; Otsu verliert die
+       blassen Linien oben. Mit Abstand 25 bleiben die Linien und das Korn geht. */
+    {name:'lokales Maximum 25', linien: linienAus(spurLokal(b, 25), b)}
   ];
   let bester = null;
   proben.forEach(function(p){
@@ -1701,8 +1970,14 @@ function linienFinden(canvas, nrZeilen){
     const wert = {name:p.name, gefunden:p.linien.length, linien:pr.linien,
                   stand:pr.stand, ergaenzt:pr.ergaenzt, entfernt:pr.entfernt};
     if(!bester) { bester = wert; return; }
+    /* v0.36: bei gleichem Stand zählen zuerst die Eingriffe der Kreuzprobe -
+       auf dem Wohnungsverteiler kam das lokale Maximum nur mit vier ergänzten
+       Linien auf 23, das Raster rutschte in den Kopf, und Zeile 1 las den
+       Tabellenkopf. Otsu fand 22 ohne Eingriff. */
+    const eingriffe = x => (x.ergaenzt || 0) + (x.entfernt || 0);
     const besser = (wert.stand === 'stimmig' && bester.stand !== 'stimmig') ||
-                   (wert.stand === bester.stand && wert.linien.length > bester.linien.length);
+                   (wert.stand === bester.stand && (eingriffe(wert) < eingriffe(bester) ||
+                    (eingriffe(wert) === eingriffe(bester) && wert.linien.length > bester.linien.length)));
     if(besser) bester = wert;
   });
   bester.dauer = jetzt()-t0;
@@ -2522,6 +2797,7 @@ async function lauf(){
   letzterNummernBericht = null;
   letzterZellenBericht = null;
   teilungErlaubt = false;
+  kaestenGeteilt = [];
   if(document.getElementById('optEntzerren').checked){
     const tE = jetzt();
     let vp = null, gefunden = 0;
@@ -2537,14 +2813,41 @@ async function lauf(){
                             xv:vp.xv, yv:vp.yv, gefunden, dauer: jetzt()-tE};
       }catch(e){ vp = null; arbeit = quelle; }
     }
+    /* v0.36: keine Textzeilen - dann die gedruckten Linien (Jüngling-Blatt) */
+    let vpL = null, linienZahl = 0;
+    if(!letzteEntzerrung && gefunden < 8){
+      try{
+        const st = linienStuecke(quelle);
+        linienZahl = st.length;
+        vpL = fluchtpunktRobust(st);
+      }catch(e){ vpL = null; }
+      /* Nur bei starker Perspektive: Fluchtpunkt näher als vier Bildbreiten.
+         Jüngling 3,2 Breiten; Wohnungsverteiler (15), Sicherungsbelegung (9)
+         und Blatt 2 (5,2) lesen gedreht besser - entzerrt verloren sie drei,
+         eine und keine Zeile, Blatt 2 bekam dafür den Hinweis unter der
+         Tabelle als Zeile 49. */
+      const stark = vpL && !vpL.parallel && Math.abs(vpL.xv - quelle.width/2) < 4*quelle.width;
+      if(vpL && !vpL.parallel && vpL.abw <= 0.5 && !stark) vpL.schwach = true;
+      if(stark && vpL.abw <= 0.5){
+        try{
+          arbeit = entzerrenNachFluchtpunkt(quelle, vpL);
+          letzteEntzerrung = {art:'linien', stuecke:vpL.stuecke, raus:vpL.raus, abw:vpL.abw,
+                              xv:vpL.xv, yv:vpL.yv, gefunden, dauer: jetzt()-tE};
+        }catch(e){ arbeit = quelle; }
+      }
+    }
     if(!letzteEntzerrung){
       try{
         winkel = schraeglage(quelle);
         arbeit = drehenUm(quelle, winkel);
       }catch(e){ winkel = 0; arbeit = quelle; }
       letzteEntzerrung = {art:'drehung', winkel, gefunden,
-        grund: !vp ? (gefunden < 8 ? 'zu wenige Textzeilen (' + gefunden + ')' : 'kein Fluchtpunkt')
-                   : (vp.parallel ? 'Textzeilen laufen parallel' : 'Abweichung ' + vp.abw.toFixed(2) + '°'),
+        grund: (!vp ? (gefunden < 8 ? 'zu wenige Textzeilen (' + gefunden + ')' : 'kein Fluchtpunkt')
+                   : (vp.parallel ? 'Textzeilen laufen parallel' : 'Abweichung ' + vp.abw.toFixed(2) + '°')) +
+               (gefunden < 8 ? '; gedruckte Linien: ' + (!vpL ? linienZahl + ' Stück(e), kein Fluchtpunkt'
+                   : vpL.parallel ? linienZahl + ' laufen parallel'
+                   : vpL.schwach ? 'Fluchtpunkt ' + (Math.abs(vpL.xv - quelle.width/2)/quelle.width).toFixed(1) + ' Bildbreiten entfernt, Perspektive zu schwach'
+                   : 'Abweichung ' + vpL.abw.toFixed(2) + '°') : ''),
         dauer: jetzt()-tE};
     }
   }
@@ -2552,51 +2855,83 @@ async function lauf(){
   let t0 = jetzt();
   setze('lesen','laeuft');
   await new Promise(r => setTimeout(r, 30));
-  let erg;
+
+  /* Lesen und gliedern: Erkennung, Tabelle, Nummernstreifen, Grenze aus den
+     Paaren. v0.37: als Einheit, damit eine zweite Lesung (Notlesung) denselben
+     Weg gehen und mit der ersten verglichen werden kann. */
+  const lesenGliedern = async function(){
+    erzwungeneNummernGrenze = null; letzterNummernBericht = null; teilungErlaubt = false;
+    const tL = jetzt();
+    const erg = await dienst.recognize(arbeit, { noCache: true });
+    const leseDauer = jetzt() - tL;
+    let info = null, fehler = null;
+    try{ info = verarbeite(erg, arbeit, winkel, leseDauer, null); }catch(err){ fehler = err; }
+
+    /* v0.23: Nummernspalte eigens lesen, wenn die Erkennung Nummern und Text
+       in gemeinsame Kästen gelegt hat */
+    if(info && info.nummernStreifen){
+      const st = info.nummernStreifen, tS = jetzt();
+      try{
+        const nr = await nummernstreifenLesen(arbeit, st);
+        letzterNummernBericht = nr.fehler ? {fehler: nr.fehler} :
+          {x0: st.x0, x1: st.x1, grenze: st.grenze, anzahl: nr.woerter.length,
+           liste: nr.woerter.slice().sort((p, q) => p.bbox.y0 - q.bbox.y0).map(w => erstesTeil(w.text)).join(' '),
+           striche: nr.striche, klammern: nr.klammern, uebernommen: nr.woerter.length >= 3, dauer: 0};
+        if(!nr.fehler && nr.woerter.length >= 3){
+          nummernEinsetzen(erg, st, nr.woerter);
+          erzwungeneNummernGrenze = st.grenze;
+        }
+      }catch(err){
+        letzterNummernBericht = {fehler: err.message};
+      }
+      if(letzterNummernBericht) letzterNummernBericht.dauer = jetzt() - tS;
+      try{ info = verarbeite(erg, arbeit, winkel, leseDauer, null); }catch(err){}
+    }
+    /* v0.33: jetzt darf die Grenze aus "Nummer Text"-Paaren greifen - vorher
+       hätte sie dem Münch-Blatt den Nummernstreifen und die Klammern genommen */
+    teilungErlaubt = true;
+    try{ info = verarbeite(erg, arbeit, winkel, leseDauer, null) || info; }catch(err){ if(!info) fehler = err; }
+    /* Güte: Einträge mit Nummer und Inhalt */
+    const guete = (letzteReihen || []).filter(r => /\d/.test(r.nr) && (r.bez || r.ort || r.sich)).length;
+    return {erg, info, leseDauer, fehler, guete, grenze: erzwungeneNummernGrenze, nrBericht: letzterNummernBericht};
+  };
+
+  let lesung;
   try{
-    erg = await dienst.recognize(arbeit, { noCache: true });
+    notlesung = false; hoheKaestenZahl = 0; kaestenGeteilt = [];
+    lesung = await lesenGliedern();
     setze('lesen','gut','', jetzt()-t0);
   }catch(err){
     setze('lesen','schlecht',(err && err.message ? err.message : String(err)), jetzt()-t0);
     document.getElementById('nochmal').disabled = false;
     return;
   }
-  const leseDauer = jetzt()-t0;
-
-  t0 = jetzt();
-  setze('nach','laeuft');
-  let info = null;
-  try{
-    info = verarbeite(erg, arbeit, winkel, leseDauer, null);
-    setze('nach','gut','', jetzt()-t0);
-  }catch(err){
-    setze('nach','schlecht', err.message, jetzt()-t0);
-  }
-
-  /* v0.23: Nummernspalte eigens lesen, wenn die Erkennung Nummern und Text
-     in gemeinsame Kästen gelegt hat */
-  if(info && info.nummernStreifen){
-    const st = info.nummernStreifen, tS = jetzt();
-    try{
-      const nr = await nummernstreifenLesen(arbeit, st);
-      letzterNummernBericht = nr.fehler ? {fehler: nr.fehler} :
-        {x0: st.x0, x1: st.x1, grenze: st.grenze, anzahl: nr.woerter.length,
-         liste: nr.woerter.slice().sort((p, q) => p.bbox.y0 - q.bbox.y0).map(w => erstesTeil(w.text)).join(' '),
-         striche: nr.striche, klammern: nr.klammern, uebernommen: nr.woerter.length >= 3, dauer: 0};
-      if(!nr.fehler && nr.woerter.length >= 3){
-        nummernEinsetzen(erg, st, nr.woerter);
-        erzwungeneNummernGrenze = st.grenze;
-      }
-    }catch(err){
-      letzterNummernBericht = {fehler: err.message};
+  /* v0.37: Notlesung. Liegen Kästen über drei Zeilen hoch im Bild, wird ein
+     zweites Mal gelesen, mit Schwelle der Karte und geteilten Kästen, und die
+     Lesung mit mehr Einträgen genommen. Hofmann: 7 gegen 35 Zeilen; Münch
+     behält seine erste Lesung. */
+  notlesungBericht = notlesungMoeglich ? (hoheKaestenZahl ? '' : 'nicht nötig (kein Kasten über drei Zeilen)') : 'nicht möglich (' + kartenSchwelleStand + ')';
+  if(notlesungMoeglich && hoheKaestenZahl){
+    const tN = jetzt();
+    let zweite = null;
+    try{ notlesung = true; zweite = await lesenGliedern(); }catch(err){ zweite = null; notlesungBericht = 'abgebrochen – ' + err.message; }
+    notlesung = false;
+    if(zweite){
+      /* nur bei deutlichem Vorsprung: auf Blatt 2 brachte sie 10 gegen 9 und
+         verdarb dafür "B10" in Zeile 47 */
+      const genommen = zweite.guete >= 1.25*lesung.guete + 2;
+      notlesungBericht = hoheKaestenZahl + ' Kasten/Kästen über drei Zeilen; ' + kartenSchwelleStand + ' (' +
+        (kaestenGeteilt.length ? kaestenGeteilt.join(', ') : 'nichts geteilt') + '): ' + zweite.guete + ' Einträge gegen ' +
+        lesung.guete + ' – ' + (genommen ? 'genommen' : 'verworfen') + ', ' + Math.round(jetzt() - tN) + ' ms';
+      if(genommen) lesung = zweite;
     }
-    if(letzterNummernBericht) letzterNummernBericht.dauer = jetzt() - tS;
-    try{ info = verarbeite(erg, arbeit, winkel, leseDauer, null); }catch(err){}
+    /* Stand der gewählten Lesung wiederherstellen */
+    erzwungeneNummernGrenze = lesung.grenze; letzterNummernBericht = lesung.nrBericht; teilungErlaubt = true;
+    try{ lesung.info = verarbeite(lesung.erg, arbeit, winkel, lesung.leseDauer, null) || lesung.info; }catch(err){}
   }
-  /* v0.33: jetzt darf die Grenze aus "Nummer Text"-Paaren greifen - vorher
-     hätte sie dem Münch-Blatt den Nummernstreifen und die Klammern genommen */
-  teilungErlaubt = true;
-  try{ info = verarbeite(erg, arbeit, winkel, leseDauer, null) || info; }catch(err){}
+  const erg = lesung.erg, leseDauer = lesung.leseDauer;
+  let info = lesung.info;
+  setze('nach', lesung.fehler && !info ? 'schlecht' : 'gut', lesung.fehler && !info ? lesung.fehler.message : '');
 
   /* v0.30: jede beschriebene Zelle einzeln lesen */
   if(document.getElementById('optZellen').checked && info && info.geometrie){
@@ -3422,6 +3757,22 @@ function holeWoerter(erg){
          und keine Ziffer übrig, ist es kein Wort. */
       const text = (w.text || '').replace(/[^\u0020-\u024F\u1E00-\u1EFF\u2010-\u2027\u2030-\u205E\u20AC]/g, '').trim();
       if(!/[0-9A-Za-zÄÖÜäöüß]/.test(text)) return;
+      /* v0.36: Nummer und Text ohne Lücke in einem Kasten - "1Herd",
+         "13|Fi-Schutzschalter" auf dem Jüngling-Blatt, wo nur ein senkrechter
+         Strich die Nummern vom Text trennt. Der Kasten wird nach dem Anteil
+         der Zeichen geteilt. Erst ab drei Buchstaben (oder zwei und Strich:
+         "4Fi-Schutzschalter"): "25A/0,03A" und "16mm" bleiben ganz. */
+      /* v0.38: auch ein Bereich vorn - "21-24 Fehlerstromschutzschalter für
+         Steckdosen (15-20)" (Hofmann, 4-Raum-Wohnung) */
+      const kl = /^(\d{1,2}(?:\s?[-–]\s?\d{1,2})?)(\s*[|\]!\/]?\s*)([A-Za-zÄÖÜäöüß]{2}[-A-Za-zÄÖÜäöüß].*)$/.exec(text);
+      if(kl){
+        const xs = x0 + br*(kl[1].length + 0.3)/text.length, xt = x0 + br*(kl[1].length + kl[2].length)/text.length;
+        const gemeinsam = {confidence: (w.confidence !== undefined ? w.confidence : 1) * 100, zeile: zi, behalten: true,
+                           vorher: w.vorher, confVorher: w.confVorher, zellGelesen: w.zellGelesen || w.vorher !== undefined};
+        raus.push(Object.assign({text: kl[1], bbox: {x0, y0, x1: xs, y1: y0+ho}, geklebt: true}, gemeinsam));
+        raus.push(Object.assign({text: kl[3], bbox: {x0: xt, y0, x1: x0+br, y1: y0+ho}}, gemeinsam));
+        return;
+      }
       raus.push({
         text,
         bbox: {x0, y0, x1: x0+br, y1: y0+ho},
@@ -3468,16 +3819,35 @@ function verarbeite(erg, arbeit, winkel, leseDauer, nachleseBericht){
   if(kopfWeg){
     const drittel = arbeit.width / 3;
     let oben = Infinity;
+    const kand = [];
     alle.forEach(w => {
       if(!w.behalten) return;
       const mx = (w.bbox.x0 + w.bbox.x1)/2;
       if(mx > drittel) return;
       if(!istKreisnummer(w.text)) return;
+      const z = zerlege(nurNummer(w.text));
+      kand.push({y0: w.bbox.y0, ym: (w.bbox.y0 + w.bbox.y1)/2, a: z.a, b: z.b});
       if(w.bbox.y0 < oben) oben = w.bbox.y0;
     });
+    const hoehe = zeilenBilden(alle.filter(w=>w.behalten)).hoehe || 30;
+    /* v0.36: die oberste Nummer, auf die in den nächsten Zeilen ihre
+       Nachfolgerin folgt. Auf dem Jüngling-Blatt las die Zellenlesung im
+       Tabellenkopf "Bezeichnung" als "3 ezeichnung" - die "3" hätte den
+       Schnitt über den Kopf gelegt. Hat keine Nummer eine Nachfolgerin,
+       bleibt es bei der obersten. */
+    kand.sort((p, q) => p.y0 - q.y0);
+    const mitFolge = kand.find(c => kand.some(d => d.y0 > c.y0 && d.y0 - c.y0 < 4*hoehe && d.a > c.b && d.a <= c.b + 2));
+    if(mitFolge) oben = mitFolge.y0;
     if(oben !== Infinity){
-      const hoehe = zeilenBilden(alle.filter(w=>w.behalten)).hoehe || 30;
       schnitt = oben - hoehe*0.6;
+      /* v0.36: gemessen an der Mitte der Nummer höchstens 0,8 Zeilen darüber.
+         Die Kästen der Erkennung sind hoch; auf dem Jüngling-Blatt lag die
+         Oberkante der "1" eine halbe Zeile über ihrer Mitte, und der
+         Tabellenkopf blieb um 2 Bildpunkte stehen. */
+      const erste = kand.find(c => c.y0 === oben);
+      if(erste) schnitt = Math.max(schnitt, erste.ym - 0.8*hoehe);
+      rueck.kopf = 'Kopf: Schnitt bei y ' + Math.round(schnitt) + ' (oberste Nummer mit Nachfolgerin bei y ' + Math.round(oben) +
+                   ', Zeilenhöhe ' + Math.round(hoehe) + ', ' + kand.length + ' Nummern im linken Drittel)';
       alle.forEach(w => {
         if((w.bbox.y0 + w.bbox.y1)/2 < schnitt) w.behalten = false;
       });
@@ -3509,7 +3879,26 @@ function verarbeite(erg, arbeit, winkel, leseDauer, nachleseBericht){
       const verschmolzen = geteilt.filter(w => spalteVon((w.bbox.x0 + w.bbox.x1)/2) === spalteVon(w.geteiltBei + 0.5*(w.bbox.y1 - w.bbox.y0))).length;
       if(verschmolzen < 2) teilGrenze = null;
     }
-    rueck.teilung = teilGrenze !== null ? {anzahl: geteilt.length, grenze: teilGrenze} : null;
+    /* v0.36: auf dem Jüngling-Blatt läuft der senkrechte Strich zwischen
+       Nummer und Text nach dem Entzerren noch schräg, von x 325 in Zeile 1
+       bis x 360 in Zeile 36 - das Entzerren richtet nur die Waagerechten.
+       Mit der festen Grenze bei 332 fielen die Nummern 24 bis 36 in die
+       Bezeichnung. Die Grenze folgt deshalb der Ausgleichsgeraden durch die
+       Trennstellen, wenn es genug davon über genug Höhe gibt. */
+    let neig = null;
+    if(teilGrenze !== null && geteilt.length >= 5){
+      const ys = geteilt.map(w => (w.bbox.y0 + w.bbox.y1)/2), xs = geteilt.map(w => w.geteiltBei);
+      const ym = ys.reduce((a, v) => a + v, 0)/ys.length, xm = xs.reduce((a, v) => a + v, 0)/xs.length;
+      let sxy = 0, syy = 0;
+      ys.forEach((y, i) => { sxy += (y - ym)*(xs[i] - xm); syy += (y - ym)*(y - ym); });
+      const hz0 = (gr && gr.hoehe) || 30;
+      const k = syy > 0 ? sxy/syy : 0;
+      if(Math.max.apply(null, ys) - Math.min.apply(null, ys) > 5*hz0 && Math.abs(k) <= 0.05 && Math.abs(k) >= 0.005){
+        neig = {k, y: ym};
+        teilGrenze = xm;
+      }
+    }
+    rueck.teilung = teilGrenze !== null ? {anzahl: geteilt.length, grenze: teilGrenze, neig} : null;
     if(erzwungeneNummernGrenze !== null || teilGrenze !== null){
       /* v0.23: die Grenze Nummer/Text kommt aus dem Nummernstreifen; von
          den selbst gefundenen Grenzen zählt nur die nächste rechts davon */
@@ -3519,7 +3908,7 @@ function verarbeite(erg, arbeit, winkel, leseDauer, nachleseBericht){
     }
     if(gr){
       grenzen = [gr.g0, gr.g1];
-      gruppen = zuordnen(gueltig, gr.g0, gr.g1);
+      gruppen = zuordnen(gueltig, gr.g0, gr.g1, (rueck.teilung && erzwungeneNummernGrenze === null) ? rueck.teilung.neig : null);
     }
   }
 
@@ -3550,7 +3939,10 @@ function verarbeite(erg, arbeit, winkel, leseDauer, nachleseBericht){
     /* Messwerte: die tatsächlichen Höhen der Zeilenmitten je Spalte. Ohne die
        rechne ich gegen ein erfundenes Blatt statt gegen deins. */
     const mess = ['Zeilenhöhe: ' + Math.round(teile[0].zeilen.hoehe || 0)];
-    if(rueck.teilung) mess.push('Nummer und Text getrennt: ' + rueck.teilung.anzahl + ' Kästen begannen mit einer Nummer, Spaltengrenze ' + Math.round(rueck.teilung.grenze));
+    mess.push('Notlesung: ' + (notlesungBericht || (notlesung ? 'läuft' : 'noch nicht entschieden')));
+    mess.push(rueck.kopf || (kopfWeg ? 'Kopf: keine Nummer im linken Drittel, nichts verworfen' : 'Kopf: abgeschaltet'));
+    if(rueck.teilung) mess.push('Nummer und Text getrennt: ' + rueck.teilung.anzahl + ' Kästen begannen mit einer Nummer, Spaltengrenze ' + Math.round(rueck.teilung.grenze) +
+                                (rueck.teilung.neig ? ' bei y ' + Math.round(rueck.teilung.neig.y) + ', schräg um ' + (rueck.teilung.neig.k*100).toFixed(1) + ' px je 100 px' : ''));
     teile.forEach(t => {
       const eintraege = t.zeilen.map(z => Math.round(z.mitte) + ' "' + z.text + '"');
       mess.push(t.name + ' (' + t.zeilen.length + '): ' + eintraege.join('  |  '));
@@ -3589,7 +3981,10 @@ function verarbeite(erg, arbeit, winkel, leseDauer, nachleseBericht){
       mess.push('Linienspuren: ' + lf.proben + ' -> gewählt: ' + lf.name +
                 ', Kreuzprobe mit der Nummernspalte: ' + lf.stand +
                 (lf.ergaenzt ? ', ' + lf.ergaenzt + ' Linie(n) ergänzt' : '') +
-                (lf.entfernt ? ', ' + lf.entfernt + ' entfernt' : ''));
+                (lf.entfernt ? ', ' + lf.entfernt + ' entfernt' : '') +
+                (lf.linien.length ? ', Linien in der Mitte von y ' + Math.round(linieBei(lf.linien[0], arbeit.width/2)) +
+                  ' bis ' + Math.round(linieBei(lf.linien[lf.linien.length-1], arbeit.width/2)) : '') +
+                (nrZ.length ? ', Nummern von y ' + Math.round(nrZ[0].mitte) + ' bis ' + Math.round(nrZ[nrZ.length-1].mitte) : ''));
       mess.push(gitter
         ? 'Linienraster: ' + gitter.anzahl + ' Linien, Zeilenhöhe ' + Math.round(gitter.hoehe) +
           ' px, Abstände gleichmäßig zu ' + Math.round(gitter.gleich*100) + ' %, deckt ' +
@@ -3625,8 +4020,9 @@ function verarbeite(erg, arbeit, winkel, leseDauer, nachleseBericht){
     }
     if(letzteEntzerrung){
       const e = letzteEntzerrung;
-      mess.push(e.art === 'textzeilen'
-        ? 'Entzerrt aus den Textzeilen: ' + e.stuecke + ' Zeilenstücke' + (e.raus ? ' (' + e.raus + ' verworfen)' : '') +
+      mess.push(e.art !== 'drehung'
+        ? (e.art === 'linien' ? 'Entzerrt aus den gedruckten Linien (' + e.gefunden + ' Textzeilen zu wenig): ' + e.stuecke + ' Linien'
+                              : 'Entzerrt aus den Textzeilen: ' + e.stuecke + ' Zeilenstücke') + (e.raus ? ' (' + e.raus + ' verworfen)' : '') +
           ', Fluchtpunkt bei x ' + Math.round(e.xv) + ' / y ' + Math.round(e.yv) +
           ', Abweichung ' + e.abw.toFixed(2) + '°, ' + Math.round(e.dauer) + ' ms'
         : 'Gedreht um ' + e.winkel.toFixed(2) + '° – nicht aus den Textzeilen entzerrt: ' + e.grund +
@@ -3644,6 +4040,8 @@ function verarbeite(erg, arbeit, winkel, leseDauer, nachleseBericht){
     tabellenText = gebaut.text;
     letzteReihen = gebaut.ist || null;
     if(gebaut.klammerBericht) mess.push('Klammern zusammengefasst: ' + gebaut.klammerBericht.join('; '));
+    if(gebaut.fussBericht && gebaut.fussBericht.length) mess.push('Unter der Tabelle, nicht als Eintrag gezählt: ' + gebaut.fussBericht.map(t => '„' + t + '"').join('; '));
+    if(gebaut.geraeteBericht && gebaut.geraeteBericht.length) mess.push('Gleiche Geräte zusammengefasst: ' + gebaut.geraeteBericht.join('; '));
     /* v0.27: ergänzen statt ersetzen - sonst fällt der gefundene Nummernstreifen
        heraus (daran scheiterten v0.23 und v0.26 auf dem Münch-Blatt) */
     rueck = Object.assign(rueck, {zweifel: gebaut.zweifel || [],
@@ -3795,8 +4193,8 @@ function verarbeite(erg, arbeit, winkel, leseDauer, nachleseBericht){
   const kz = 'Kennzahlen: ' + (leseDauer/1000).toFixed(1) + ' s · ' +
              gueltig.length + ' von ' + alle.length + ' Wörtern behalten · ' +
              (gueltig.length ? Math.round(summe/gueltig.length) : 0) + ' % mittlere Sicherheit · ' +
-             (letzteEntzerrung && letzteEntzerrung.art === 'textzeilen'
-                ? 'aus ' + letzteEntzerrung.stuecke + ' Textzeilen entzerrt\n'
+             (letzteEntzerrung && letzteEntzerrung.art !== 'drehung'
+                ? 'aus ' + letzteEntzerrung.stuecke + (letzteEntzerrung.art === 'linien' ? ' gedruckten Linien' : ' Textzeilen') + ' entzerrt\n'
                 : (winkel ? winkel.toFixed(2) : '0') + '° Schräglage\n') +
              'Einstellungen: Modell ' + (MODELLE[aktivesModell] ? MODELLE[aktivesModell].name : aktivesModell) +
              ', Schwelle ' + document.getElementById('schwelle').value +
@@ -3915,8 +4313,8 @@ function ernteBauen(teile, raster, zuB, zuO, meta){
     quelle: {
       breite: meta.breite, hoehe: meta.hoehe,
       schraeglage: meta.winkel ? Math.round(meta.winkel*100)/100 : 0,
-      entzerrung: letzteEntzerrung ? (letzteEntzerrung.art === 'textzeilen'
-        ? {art:'textzeilen', stuecke:letzteEntzerrung.stuecke, verworfen:letzteEntzerrung.raus,
+      entzerrung: letzteEntzerrung ? (letzteEntzerrung.art !== 'drehung'
+        ? {art:letzteEntzerrung.art, stuecke:letzteEntzerrung.stuecke, verworfen:letzteEntzerrung.raus,
            fluchtpunkt:[Math.round(letzteEntzerrung.xv), Math.round(letzteEntzerrung.yv)],
            abweichung: Math.round(letzteEntzerrung.abw*100)/100}
         : {art:'drehung', grund:letzteEntzerrung.grund}) : null,
@@ -4080,7 +4478,11 @@ const ABKUERZUNGEN = {
   'bel':'Beleuchtung','licht':'Licht','lt':'Licht',
   /* v0.29 (Jean): Steckdose/Steckdosen-Kürzel bleiben gekürzt, einheitlich "SD" -
      aus ihnen lässt sich Einzahl oder Mehrzahl nicht ablesen */
-  'std':'SD','sd':'SD','stdo':'SD','stckd':'SD','stkd':'SD','steckd':'SD','dose':'Steckdose',
+  /* v0.35 (Jean, 25.09.2026): statt "SD" - wo Einzahl oder Mehrzahl nicht
+     abzulesen ist, "Steckdose(n)"; vor einem einzelnen Gerät macht aufsSchema
+     daraus "Steckdose" */
+  'std':'Steckdose(n)','sd':'Steckdose(n)','stdo':'Steckdose(n)','stckd':'Steckdose(n)','stkd':'Steckdose(n)',
+  'steckd':'Steckdose(n)','dose':'Steckdose','rcb':'FI-Schutzschalter','spülmaschine':'Geschirrspüler',
   'cee':'CEE-Steckdose','gs':'Geschirrspüler','gsp':'Geschirrspüler',
   'wm':'Waschmaschine','wama':'Waschmaschine','tr':'Trockner','trk':'Trockner',
   'af':'Arbeitsfläche','li':'links','re':'rechts',
@@ -4108,8 +4510,15 @@ function sicherungDeuten(roh){
   let t = saeubern(roh).replace(/\s+/g,'').replace(/\./g,',').toUpperCase();
   if(!t){ erg.leer = true; return erg; }
   let korrigiert = false;
+  /* v0.36: Jüngling-Blatt - "Automat B16" in der Spalte Schutzgerät, und
+     "25A/0,03A" mit dem Hinweis "bitte monatlich prüfen" dahinter in der
+     Nachbarspalte. Das Gerätewort vorn fällt weg, der Hinweis hinter einem
+     FI ebenso (Jeans Festlegung: Hinweise neben einem Eintrag fallen weg). */
+  t = t.replace(/^(AUTOMAT|LS-?SCHALTER|LSS|LS|SICHERUNG)(?=[BCDKZ]?\d)/, '');
+  let fiRest = null, m;
+  if((m = /^(\d{1,3})A?\/0,(\d{1,3})A?[|\/!]?([A-ZÄÖÜ].*)$/.exec(t))){ fiRest = m[3]; t = m[1] + '/0,' + m[2]; }
   /* "816" statt "B16": in einer Sicherungsspalte gibt es keine 816 Ampere. */
-  let m = /^8(\d{1,2})$/.exec(t);
+  m = /^8(\d{1,2})$/.exec(t);
   if(m && +m[1] <= 63){ t = 'B' + m[1]; korrigiert = true; }
   t = t.replace(/A$/, '');
   /* "Bl6" statt "B16": hinter der Kennlinie stehen nur Ziffern, also
@@ -4119,11 +4528,12 @@ function sicherungDeuten(roh){
     if(/^\d{1,3}$/.test(z) && +z <= 125){ t = m[1] + z; korrigiert = true; }
   }
 
-  if((m = /^(\d{1,3})\/0,(\d{1,3})$/.exec(t))){
+  if((m = /^(\d{1,3})A?\/0,(\d{1,3})$/.exec(t))){
     erg.art = 'FI';
     erg.strom = +m[1];
     erg.ma = Math.round(parseFloat('0.' + m[2]) * 1000);
     erg.text = 'FI ' + erg.strom + ' A / ' + erg.ma + ' mA';
+    if(fiRest) erg.hinweis = 'Hinweis weggelassen: ' + fiRest.toLowerCase();
   } else if((m = /^([BCDKZ])(\d{1,3})$/.exec(t))){
     erg.art = 'LS'; erg.kennlinie = m[1]; erg.strom = +m[2];
     erg.text = m[1] + ' ' + erg.strom + ' A';
@@ -4261,6 +4671,8 @@ function feldDeuten(roh, liste){
     else { erg.text = t; erg.unklar = true; erg.herkunft = 'unklar'; return erg; }
   }
   if(!raus.length){ erg.leer = true; return erg; }
+  /* v0.36: ein Raum nur einmal ("Flur/Bad/Küche, Steckdose Flur") */
+  if(liste === ORTE) raus.splice(0, raus.length, ...raus.filter((x, i) => raus.indexOf(x) === i));
   erg.text = raus.join(liste === ORTE ? ', ' : ' / ');
   erg.herkunft = frei ? 'frei' : (korrigiert ? 'korrigiert' : 'gelesen');
   return erg;
@@ -4284,7 +4696,14 @@ function istOrtsteil(wort){
 }
 
 function bezUndOrt(roh){
-  const t = klebeLoesen(saeubern(roh));
+  /* v0.36: nummerierte Räume vorher zusammenhalten - "Schlafzimmer/Kind 2"
+     (Jüngling-Blatt) zerfiel sonst an der Lücke vor der 2 */
+  /* v0.38: Kürzel mit Punkt kleben am nächsten Wort ("Std.Küche",
+     "Bel.Flur", "Std.+ Bel.Bad" - Blatt IMG_6744); "+" und "/" werden eigene
+     Trennzeichen, damit Räume und Bezeichnungen dazwischen einzeln zählen */
+  let t = nummerierteRaeume(klebeLoesen(saeubern(roh)));
+  if(/[A-Za-zäöüß]\.[A-ZÄÖÜ+\/]|\.\s*\+/.test(t))
+    t = t.replace(/([A-Za-zÄÖÜäöüß]{2,})\.(?=[A-ZÄÖÜ+\/])/g, '$1. ').replace(/\s*([+\/])\s*/g, ' $1 ').replace(/\s+/g, ' ').trim();
   if(!t) return {bez:feldDeuten('', BEZEICHNUNGEN), ort:feldDeuten('', ORTE)};
   const woerter = t.split(' ').filter(Boolean);
   /* Nur Ortswörter in der Zelle: dann ist sie der Ort. Dass eine ganze
@@ -4299,11 +4718,20 @@ function bezUndOrt(roh){
      Wörter über die Abkürzungstabelle geführt: Elektroherd wird E-Herd,
      Arbeitsplatte wird Arbeitsfläche. */
   const bezW = [], ortW = [];
-  let ersetzt = false;
+  let ersetzt = false, trenner = false;
   woerter.forEach(function(w, i){
+    if(w === '+' || w === '/'){ if(bezW.length) trenner = true; return; }
     const rein = w.replace(/[,;.]+$/,'');
     if(!rein) return;
-    if(i > 0 && istOrtsteil(rein)){ ortW.push(rein); return; }
+    /* v0.36: endet der Ort mit einem Komma, beginnt dahinter der zweite Teil
+       eines Paares - "Beleuchtung Flur/Bad/Küche, Steckdose Flur" ist
+       "Beleuchtung, Steckdose", "Waschmaschine Bad, Spiegelschrank" ist
+       "Waschmaschine, Spiegelschrank" (Jüngling-Blatt) */
+    if(i > 0 && istOrtsteil(rein)){ ortW.push(rein); if(/,$/.test(w) && bezW.length) trenner = true; return; }
+    if(trenner){ bezW.push('/'); trenner = false; }
+    /* v0.37: auch zwischen zwei Bezeichnungen trennt das Komma ein Paar -
+       "Dunstabzugshaube, Kühlschrank" (Hofmann) */
+    if(/,$/.test(w)) trenner = true;
     const ab = ABKUERZUNGEN[rein.toLowerCase()];
     if(ab && BEZEICHNUNGEN.indexOf(ab) >= 0 && ab.toLowerCase() !== rein.toLowerCase()){
       bezW.push(ab); ersetzt = true;
@@ -4381,9 +4809,18 @@ function rollenVerteilen(teile){
 function kreisStriche(t){
   return (t || '').replace(/(\d)\s*[\/,\-–—.]+\s*(\d)/g, '$1–$2');
 }
+function nummerierteRaeume(t){
+  /* v0.37: "Essbereich rechts" ist ein Ort (Jean, Hofmann-Blatt) - ein Bereich
+     behält seine Lage; "Steckdose Küche links" bleibt Steckdose links */
+  t = (t || '').replace(/\b([A-ZÄÖÜ][a-zäöüß]*bereich)\s+(links|rechts|mitte|vorn|hinten)\b/g, '$1\u00a0$2');
+  return t.replace(/\bKind\s*(\d{1,2})\b/g, 'Kinderzimmer $1')
+    .replace(/\b([A-ZÄÖÜ][a-zäöüß]+)\s+(\d{1,2})\s+und\s+(\d{1,2})\b/g, '$1 $2, $1 $3')
+    .replace(/\b([A-ZÄÖÜ][a-zäöüß]+)\s+(\d{1,2})\b/g, function(g, raum, n){ return istRaum(raum) ? raum + '\u00a0' + n : g; });
+}
+const HINWEIS = /\b(monatlich|halbjährlich|vierteljährlich|jährlich|Prüftaste|auslösen|drücken)\b/i;
 const LAGEWOERTER = ['wand', 'fenster', 'tür', 'tuer', 'decke', 'boden', 'links', 'rechts', 'mitte', 'oben', 'unten', 'eingang'];
 function istRaum(w){
-  const l = (w || '').toLowerCase();
+  const l = (w || '').replace(/\u00a0(\d{1,2}|links|rechts|mitte|vorn|hinten)$/, '').toLowerCase();
   return l && ORTE.some(x => x.toLowerCase() === l);
 }
 function aufsSchema(r){
@@ -4397,7 +4834,7 @@ function aufsSchema(r){
   if(r.n && r.n.text) r.n.text = kreisStriche(r.n.text).replace(/\s+/g, '');
   const bez = (r.bez && !r.bez.leer) ? r.bez.text : '';
   const sich = (r.sich && !r.sich.leer) ? r.sich.text : '';
-  const FI_WORT = /fehlerstrom|schutzschalter|\bF[Il1|]\s*[-‐‑–]?\s*Schalter\b/i;
+  const FI_WORT = /fehlerstrom|schutzschalter|\bF[Il1|]\s*[-‐‑–]?\s*Schalter\b|\bRC[DB]\b/i;
   const ortText = (r.ort && !r.ort.leer) ? r.ort.text : '';
   /* v0.33: der FI kann auch in der Ortsspalte stehen, wenn die Bezeichnung leer
      ist - auf dem Wohnungsverteiler steht "Q1 FI-Schalter für Stromkreis 9 und
@@ -4413,6 +4850,23 @@ function aufsSchema(r){
     if(sk && r.ort && (r.ort.leer || fiImOrt)){ setze(r.ort, skText); r.ort.roh = skText; }
     if(sk && !r.ort) r.ort = {text: skText, herkunft: 'korrigiert', leer: false, unklar: false, roh: skText};
     if(fiImOrt && !sk && r.ort) setze(r.ort, '');
+    /* v0.35: "RCB 13-20" / "RCD 25-32" (Hofmann) - die Kreise stehen ohne das
+       Wort Stromkreis direkt hinter dem Gerät; RCB ist ein Schreibfehler für RCD
+       (Jean, 25.09.2026) */
+    /* v0.38: die Beschreibung hinter dem Gerät ist der Ort, wörtlich -
+       "Fehlerstromschutzschalter für Steckdosen (15-20)" (Hofmann, 4-Raum-
+       Wohnung); Jean: Beschreibungstexte am FI bleiben wörtlich */
+    const hinter = !sk && !fiImOrt && /^\s*(?:Fehlerstromschutzschalter|F[Il1]\s*[-‐‑–]?\s*Schutzschalter|FI|RC[DB])\s+(f(?:ü|u)r\s.+)$/i.exec(saeubern((r.bez && r.bez.roh) || bez));
+    if(hinter && (!r.ort || r.ort.leer)){
+      const t = kreisStriche(hinter[1]).replace(/\s+/g, ' ').trim();
+      if(r.ort){ setze(r.ort, t); r.ort.roh = t; } else r.ort = {text: t, herkunft: 'korrigiert', leer: false, unklar: false, roh: t};
+      if(/^\s*Fehlerstromschutzschalter/i.test(bez)) setze(r.bez, 'Fehlerstromschutzschalter');
+    }
+    const nurKreise = !sk && /^\s*(?:RC[DB]|F[Il1]\S*)\s+(\d{1,2})\s*[-–\/]\s*(\d{1,2})\s*$/i.exec(bez);
+    if(nurKreise){
+      const t = 'Stromkreis ' + nurKreise[1] + '–' + nurKreise[2];
+      if(r.ort){ setze(r.ort, t); r.ort.roh = t; } else r.ort = {text: t, herkunft: 'korrigiert', leer: false, unklar: false, roh: t};
+    }
     if(!/fehlerstrom/i.test(bez)) setze(r.bez, 'FI-Schutzschalter');
     /* v0.33 (Jean, 25.09.2026): steht am FI nur ein Nennstrom ("25A"), ist es
        ein FI mit 30 mA; zweipolig über seine Teilungseinheiten wählt später der
@@ -4436,7 +4890,10 @@ function aufsSchema(r){
     const rest = [];
     /* v0.30: Räume über die Kürzeltabelle - sonst bleibt "Bad" stehen, wenn
        die Ortsspalte außer dem Raum noch etwas trägt (Münch, Zeile 11) */
-    r.ort.text.split(/[,+\s]+/).filter(w => w && w !== 'und').forEach(function(w){
+    /* v0.35: nummerierte Räume bleiben zusammen ("Kinderzimmer 2"); "Kind 2" ->
+       "Kinderzimmer 2", "Kinderzimmer 1 und 2" -> "Kinderzimmer 1, Kinderzimmer 2" */
+    const ortRoh = nummerierteRaeume(r.ort.text);
+    ortRoh.split(/[,+ \t]+/).filter(w => w && w !== 'und').forEach(function(w){
       if(!istRaum(w)){
         /* v0.33: nahe Treffer auf der Ortsliste zählen als Raum ("Kiche") */
         const d = w.length >= 4 ? teilDeuten(w, ORTE) : null;
@@ -4457,12 +4914,29 @@ function aufsSchema(r){
     raeume.push(ab && ORTE.indexOf(ab) >= 0 ? ab : vorn[0]);
     b = vorn.slice(1).join(' ');
     const lage = b.split(/[\s\/,]+/).filter(Boolean);
-    if(lage.length && lage.every(w => LAGEWOERTER.indexOf(w.toLowerCase()) >= 0)) b = 'SD ' + lage.join(', ');
+    if(lage.length && lage.every(w => LAGEWOERTER.indexOf(w.toLowerCase()) >= 0)) b = 'Steckdose(n) ' + lage.join(', ');
   }
   b = b.replace(/\s*\/\s*/g, ', ').replace(/\s+/g, ' ').trim();
   b = b.replace(/Überspannungsschutz/g, 'Überspannungsableiter');
+  /* v0.38: Spülmaschine ist der Geschirrspüler, auch verlesen ("Spiülmaschine", IMG_6744) */
+  b = b.replace(/\bSp[a-zäöü]{0,2}lmaschine\b/g, 'Geschirrspüler');
   if(/^Geschirrspüler\b/.test(b)) b = 'Steckdose ' + b;
+  /* v0.35 (Jean, 25.09.2026): vor einem einzelnen Gerät ist es eine Steckdose;
+     Waschmaschine bekommt immer die Steckdose davor, mit weiterem Gerät die
+     Mehrzahl ("Steckdosen Waschmaschine, Spiegelschrank") */
+  b = b.replace(/^Steckdose\(n\)\s+(?=(Waschmaschine|Geschirrspüler|Trockner|Kühlschrank)\b)/, 'Steckdose ');
+  if(/^Waschmaschine\b/.test(b)) b = (/,/.test(b) ? 'Steckdosen ' : 'Steckdose ') + b;
+  b = b.replace(/^SD\b/, 'Steckdose(n)');
+  /* v0.37: der Punkt einer Abkürzung bleibt - "allgem." (Jean: bleibt, wie es
+     ist); saeubern() nimmt ihn am Ende der Zelle mit weg. Nur kurze Wörter,
+     die auf keiner Liste stehen. */
+  (((r.bez && r.bez.roh) || '').match(/[A-Za-zÄÖÜäöüß]{3,7}\./g) || []).forEach(function(m){
+    const w = m.slice(0, -1);
+    if(BEZEICHNUNGEN.concat(ORTE).some(x => x.toLowerCase() === w.toLowerCase())) return;
+    b = b.split(' ').map(t => t === w ? m : (t === w + ',' ? m + ',' : t)).join(' ');
+  });
   if(b !== bez) setze(r.bez, b);
+  raeume = raeume.filter((x, i) => raeume.indexOf(x) === i);
   if(r.ort && (raeume.length || !r.ort.leer)) setze(r.ort, raeume.join(', '));
   if(!r.ort && raeume.length) r.ort = {text: raeume.join(', '), herkunft: 'korrigiert', leer: false, unklar: false, roh: ''};
   if(r.ort && r.ort.leer && (/^E-Herd\b/.test(b) || /^Steckdose Geschirrspüler\b/.test(b))) setze(r.ort, 'Küche');
@@ -4486,7 +4960,7 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
   const benutzt = {1:{}, 2:{}};
 
   const leerD = function(){ return {text:'', herkunft:'leer', unklar:false, leer:true, roh:''}; };
-  const reihen = [], zweifel = [];
+  const reihen = [], zweifel = [], fussBericht = [];
   const spalteSpanne = {};
   [1,2].forEach(function(i){
     let a = Infinity, b = -Infinity;
@@ -4542,6 +5016,10 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
         if(rz === null || rz === undefined || !zz.frei[j]) return;
         let best = -1, bestK = -Infinity;
         raster.k.forEach(function(k, zi){ if(k < rz && k > bestK){ bestK = k; best = zi; } });
+        /* v0.38: ein Hinweis unter dem Eintrag setzt ihn nicht fort, er fällt
+           weg (Jean) - "Prüftaste Fehlerstromschutzschalter monatlich
+           drücken!!" unter 33-36 (Hofmann, 4-Raum-Wohnung) */
+        if(HINWEIS.test(teile[i].zeilen[j].text)) return;
         if(best >= 0 && rz - bestK <= 2 && zz.zu[best] >= 0){
           (fortsetzung[i][best] = fortsetzung[i][best] || []).push(saeubern(teile[i].zeilen[j].text));
           benutzt[i][j] = true;
@@ -4589,6 +5067,15 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
         const m = /^\s*(Q\d{1,2})\s+(.*)$/.exec(roh[k]);
         if(m && !q){ q = m[1]; roh[k] = m[2]; }
       });
+      /* v0.36: unter mindestens drei leeren Zeilen und ohne gelesene Nummer
+         ist es kein Eintrag mehr, sondern der Fuß des Blattes - auf dem
+         Jüngling-Blatt "Anlage errichtet im Juli 2016 durch ELEKTRO JÜNGLING
+         GMBH" im Kasten unter Zeile 36, sonst als 37* gezählt */
+      const leer = x => x.bez.leer && x.ort.leer && x.sich.leer;
+      if(!q && reihen.length >= 3 && reihen.slice(-3).every(leer)){
+        fussBericht.push(rollenMitText.map(k => saeubern(roh[k])).join(' ').slice(0, 60));
+        return;
+      }
       n = q ? {text:q, roh:q, geaendert:false, unklar:false, luecke:0, a:null, b:null, herkunft:'gelesen'}
             : {text:String(erwartet), roh:'', geaendert:false, unklar:false, luecke:0,
                b:erwartet, herkunft:'frei', abgeleitet:true};
@@ -4756,6 +5243,8 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
 
   const klammerBericht = klammernZusammenfassen(reihen);
   reihen.forEach(aufsSchema);
+  const geraeteBericht = geraeteZusammenfassen(reihen);
+  reihen.forEach(function(r){ [r.bez, r.ort].forEach(f => { if(f && f.text) f.text = f.text.replace(/\u00a0/g, ' '); }); });
 
   reihen.forEach(function(r, idx){
     if(r.luecke > 0){
@@ -4850,7 +5339,39 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
   /* v0.28: die fertigen Zeilen für den Abgleich mit der Musterlösung */
   const ist = reihen.map(r => ({nr: r.n.text || '', bez: r.bez.leer ? '' : r.bez.text,
     ort: (r.ort && !r.ort.leer) ? r.ort.text : '', sich: (r.sich && !r.sich.leer) ? r.sich.text : ''}));
-  return {knoten: huelle, text, zuB, zuO, zweifel, ist, klammerBericht};
+  return {knoten: huelle, text, zuB, zuO, zweifel, ist, klammerBericht, geraeteBericht, fussBericht};
+}
+
+/* v0.35 (Jean, 25.09.2026): aufeinanderfolgende Einzelnummern mit demselben
+   Gerät sind ein Gerät über mehrere Teilungseinheiten - Überspannungsableiter
+   01-04 (Hofmann), E-Herd 37-39 (Blatt 2), Hauptschalter, und FI, wenn sie
+   dieselben Kreise abdecken (Dewitz 2: 7 und 8 "Stromkreis 6"). Nur bei
+   gleichem Ort und gleicher Absicherung. */
+const MEHRPOLIG = /^(Überspannungsableiter|E-Herd|Hauptschalter|FI-Schutzschalter|Fehlerstromschutzschalter)$/;
+function geraeteZusammenfassen(reihen){
+  const bericht = [];
+  const txt = f => (f && !f.leer) ? (f.text || '') : '';
+  for(let i = 0; i < reihen.length; i++){
+    const a = reihen[i];
+    /* nur Einzelnummern: gemessene Klammern (Dewitz 2: E-Herd 3–4, 5–6, 7–8)
+       sind schon je ein Gerät und bleiben getrennt */
+    const einzeln = r => r.n && typeof r.n.b === 'number' && (r.n.a === null || r.n.a === undefined || r.n.a === r.n.b);
+    if(!einzeln(a) || !MEHRPOLIG.test(txt(a.bez))) continue;
+    let j = i;
+    while(j + 1 < reihen.length){
+      const b = reihen[j + 1], vor = reihen[j];
+      /* fortgezählte Nummern (Blatt 2, FI 45 und 46) tragen nur b */
+      if(!einzeln(b) || b.n.b !== vor.n.b + 1) break;
+      if(txt(b.bez) !== txt(a.bez) || txt(b.ort) !== txt(a.ort) || txt(b.sich) !== txt(a.sich)) break;
+      j++;
+    }
+    if(j === i) continue;
+    const von = a.n.b, bis = reihen[j].n.b;
+    bericht.push(von + '–' + bis + ' ' + txt(a.bez));
+    a.n.text = von + '–' + bis; a.n.a = von; a.n.b = bis; a.hinweis = '';
+    reihen.splice(i + 1, j - i);
+  }
+  return bericht;
 }
 
 /* v0.31: gemessene Klammern zu einem Eintrag zusammenfassen - der Vorschlag
@@ -5315,7 +5836,7 @@ document.getElementById('stapelLos').addEventListener('click', async function(){
     const dauer = (jetzt() - t0)/1000;
     const ernte = letzteErnte;
     const zeilen = ernte && ernte.zellen ? new Set(ernte.zellen.filter(c => c.zeile !== null).map(c => c.zeile)).size : 0;
-    const weg = letzteEntzerrung ? (letzteEntzerrung.art === 'textzeilen' ? 'entzerrt' : 'gedreht') : '';
+    const weg = letzteEntzerrung ? (letzteEntzerrung.art !== 'drehung' ? 'entzerrt' : 'gedreht') : '';
     const text = letzteAusgabe.startsWith(umgebungText) ? letzteAusgabe.slice(umgebungText.length).trim() : letzteAusgabe;
     stapel.push({id: e.id, name: e.name, dateiname: e.dateiname,
       kurz: gut ? (letzterAbgleich ? letzterAbgleich.richtig + ' von ' + letzterAbgleich.zeilen + ' richtig · ' : '') +
