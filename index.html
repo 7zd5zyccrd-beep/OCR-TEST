@@ -1,7 +1,24 @@
 <!DOCTYPE html>
 <!--
   PaddleOCR-Test · Verteilerbeschreibung
-  v0.38 · 25.09.2026
+  v0.40 · 25.09.2026
+
+  v0.40: Fehlerbehebungen aus dem iPhone-Durchlauf mit v0.38 (153 von 164).
+  Die Nachlese nimmt keine Lesung, die nur noch die Hälfte der Buchstaben hat
+  ("Bad + K iche" -> "he"); die Zellenlesung gewinnt nicht mit bloßen Satz-
+  zeichen ("Steuersicherung, Trafo"); die Grenze Nummer/Text darf bis 10 %
+  schräg laufen (grüne Streifen, 17); eine Zeile, die mit einer Bezeichnung
+  beginnt, ist keine Fortsetzung (Hofmann, "Relais Küche"); die FI-
+  Beschreibung auch mit "fir"; Hinweise ohne Nummer fallen weg ("betätigen");
+  eine Nummer am Ende der Spalte, kleiner als die davor und weit darunter,
+  wird verworfen (Wohnungsverteiler, "2" im Fußtext).
+
+  v0.39: Nummerierung in halben Teilungseinheiten (Jean, 25.09.2026:
+  Schmidtgen & Mieth, 3-8 ist ein E-Herd). Belegen vier von fünf Einträgen
+  eine gerade Anzahl Nummern ab einer ungeraden, werden auch aufeinander-
+  folgende Bereiche mit demselben mehrpoligen Gerät ein Eintrag; die
+  Messwerte melden das Ergebnis der Prüfung und die TE, beim E-Herd mit der
+  Probe "passt zum dreipoligen Herd".
 
   v0.38: die zurückgehaltenen Blätter, blind mit v0.37 geprüft: IMG_6635
   13/18, IMG_6744 4/13 - danach Lernblätter. Kürzel mit Punkt kleben am
@@ -749,7 +766,7 @@ pre.abgleich.gut{background:#EAF5DC;border-color:#8FBE36}
 
   <header>
     <h1>PaddleOCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.38 · 25.09.2026</span>
+    <span class="ver">v0.40 · 25.09.2026</span>
   </header>
 
   <div class="karte">
@@ -923,7 +940,7 @@ const MODELLE = {
   latin: {name:'v5 lateinisch',  konstante:'V5_LATIN_MOBILE_MODEL'}
 };
 
-const VERSION = 'v0.38 · 25.09.2026';
+const VERSION = 'v0.40 · 25.09.2026';
 
 /* ==================== Schrittliste ==================== */
 
@@ -3346,6 +3363,11 @@ async function nachlesen(arbeit, zweifel, h){
        eine zweite Lesung darf eine gute erste nie verschlechtern. */
     eintrag.uebernommen = eintrag.neu.length >= 2 && eintrag.confNeu >= z.conf &&
                           eintrag.neu !== saeubern(z.text);
+    /* v0.40: nicht, wenn die zweite Lesung nur noch einen Bruchteil der
+       Buchstaben hat - auf dem iPhone wurde "Bad + K iche" (Wohnungsverteiler)
+       so zu "he" */
+    const buchst = t => (t.match(/[A-Za-zÄÖÜäöüß]/g) || []).length;
+    if(eintrag.uebernommen && buchst(eintrag.neu) < 0.5*buchst(saeubern(z.text))) eintrag.uebernommen = false;
     if(z.leer){
       /* Ein leeres Feld hat keine alte Lesung zum Vergleichen - also eine
          feste Mindestsicherheit, und es müssen echte Zeichen sein, kein Strich
@@ -3707,6 +3729,12 @@ async function zellenLesen(arbeit, geo){
     /* v0.33: ein leeres Feld wie in der Nachlese erst ab 80 % - Staub und
        Risse werden sonst zu Text (Sicherungsbelegung: "111" mit 55 %) */
     if(!z.woerter.length && confNeu < 80) e.uebernommen = false;
+    /* v0.40: unterscheidet sich die Zweitlesung nur in Satzzeichen, bleibt die
+       erste - auf dem iPhone erfand sie auf der Sicherungsbelegung ein Komma
+       ("Steuersicherung, Trafo"), und das Komma trennt seit v0.37 ein Paar.
+       Leerzeichen zählen weiter: "SteckdoseBad/WC" -> "Steckdose Bad/ WC". */
+    const ohneZeichen = t => (t || '').replace(/[.,;:'`´]/g, '');
+    if(e.uebernommen && alt && ohneZeichen(neu) === ohneZeichen(alt)) e.uebernommen = false;
     if(e.uebernommen && !z.woerter.length){
       /* leeres Feld: der neue Kasten sitzt, wo der Text im Ausschnitt stand */
       const ua = Math.min.apply(null, w.map(q => q.bbox.x0)), ub = Math.max.apply(null, w.map(q => q.bbox.x1));
@@ -3763,7 +3791,9 @@ function holeWoerter(erg){
          der Zeichen geteilt. Erst ab drei Buchstaben (oder zwei und Strich:
          "4Fi-Schutzschalter"): "25A/0,03A" und "16mm" bleiben ganz. */
       /* v0.38: auch ein Bereich vorn - "21-24 Fehlerstromschutzschalter für
-         Steckdosen (15-20)" (Hofmann, 4-Raum-Wohnung) */
+         Steckdosen (15-20)" (Hofmann, 4-Raum-Wohnung). Eine Gerätekennung
+         ("Q1 FI-Schalter") hier abzutrennen, kostete dem Wohnungsverteiler am
+         Rechner seine Q1-Zeile - dort greift die Regel in baueTabelle. */
       const kl = /^(\d{1,2}(?:\s?[-–]\s?\d{1,2})?)(\s*[|\]!\/]?\s*)([A-Za-zÄÖÜäöüß]{2}[-A-Za-zÄÖÜäöüß].*)$/.exec(text);
       if(kl){
         const xs = x0 + br*(kl[1].length + 0.3)/text.length, xt = x0 + br*(kl[1].length + kl[2].length)/text.length;
@@ -3884,7 +3914,9 @@ function verarbeite(erg, arbeit, winkel, leseDauer, nachleseBericht){
        bis x 360 in Zeile 36 - das Entzerren richtet nur die Waagerechten.
        Mit der festen Grenze bei 332 fielen die Nummern 24 bis 36 in die
        Bezeichnung. Die Grenze folgt deshalb der Ausgleichsgeraden durch die
-       Trennstellen, wenn es genug davon über genug Höhe gibt. */
+       Trennstellen, wenn es genug davon über genug Höhe gibt. v0.40: bis 10 %
+       statt 5 % - auf dem grünen Streifenblatt läuft die Nummernspalte um
+       6,8 % schräg, die 17 fiel in den Text (iPhone und Streuung). */
     let neig = null;
     if(teilGrenze !== null && geteilt.length >= 5){
       const ys = geteilt.map(w => (w.bbox.y0 + w.bbox.y1)/2), xs = geteilt.map(w => w.geteiltBei);
@@ -3893,7 +3925,7 @@ function verarbeite(erg, arbeit, winkel, leseDauer, nachleseBericht){
       ys.forEach((y, i) => { sxy += (y - ym)*(xs[i] - xm); syy += (y - ym)*(y - ym); });
       const hz0 = (gr && gr.hoehe) || 30;
       const k = syy > 0 ? sxy/syy : 0;
-      if(Math.max.apply(null, ys) - Math.min.apply(null, ys) > 5*hz0 && Math.abs(k) <= 0.05 && Math.abs(k) >= 0.005){
+      if(Math.max.apply(null, ys) - Math.min.apply(null, ys) > 5*hz0 && Math.abs(k) <= 0.1 && Math.abs(k) >= 0.005){
         neig = {k, y: ym};
         teilGrenze = xm;
       }
@@ -3947,6 +3979,24 @@ function verarbeite(erg, arbeit, winkel, leseDauer, nachleseBericht){
       const eintraege = t.zeilen.map(z => Math.round(z.mitte) + ' "' + z.text + '"');
       mess.push(t.name + ' (' + t.zeilen.length + '): ' + eintraege.join('  |  '));
     });
+    /* v0.40: eine Nummer am Ende der Spalte, kleiner als ihre Vorgängerin und
+       weit darunter, gehört nicht zur Folge - auf dem iPhone las der Nummern-
+       streifen des Wohnungsverteilers eine "2" im Fußtext, 961 Punkte unter der
+       10, und das Zeilengesetz rechnete mit Zeilenhöhen von 27 bis 190. */
+    {
+      const z0 = teile[0].zeilen, wert = z => { const m = /\d+/.exec(z.text || ''); return m ? +m[0] : null; };
+      const abst = [];
+      for(let i = 1; i < z0.length; i++) abst.push(z0[i].mitte - z0[i-1].mitte);
+      const mAbst = abst.length ? median(abst) : 0;
+      while(z0.length >= 4){
+        const l = z0[z0.length-1], v = z0[z0.length-2];
+        if(wert(l) !== null && wert(v) !== null && wert(l) < wert(v) && l.mitte - v.mitte > 3*mAbst){
+          mess.push('Nummer „' + l.text + '" bei y ' + Math.round(l.mitte) + ' verworfen: kleiner als die ' + wert(v) + ' davor und ' +
+                    Math.round((l.mitte - v.mitte)/mAbst) + ' Zeilen darunter');
+          z0.pop();
+        } else break;
+      }
+    }
     const nrZ = teile[0].zeilen;
     if(nrZ.length > 1){
       const abstaende = [];
@@ -4041,6 +4091,7 @@ function verarbeite(erg, arbeit, winkel, leseDauer, nachleseBericht){
     letzteReihen = gebaut.ist || null;
     if(gebaut.klammerBericht) mess.push('Klammern zusammengefasst: ' + gebaut.klammerBericht.join('; '));
     if(gebaut.fussBericht && gebaut.fussBericht.length) mess.push('Unter der Tabelle, nicht als Eintrag gezählt: ' + gebaut.fussBericht.map(t => '„' + t + '"').join('; '));
+    if(letzteHalbeTE) mess.push('Halbe Teilungseinheiten: ' + letzteHalbeTE.text);
     if(gebaut.geraeteBericht && gebaut.geraeteBericht.length) mess.push('Gleiche Geräte zusammengefasst: ' + gebaut.geraeteBericht.join('; '));
     /* v0.27: ergänzen statt ersetzen - sonst fällt der gefundene Nummernstreifen
        heraus (daran scheiterten v0.23 und v0.26 auf dem Münch-Blatt) */
@@ -4817,7 +4868,7 @@ function nummerierteRaeume(t){
     .replace(/\b([A-ZÄÖÜ][a-zäöüß]+)\s+(\d{1,2})\s+und\s+(\d{1,2})\b/g, '$1 $2, $1 $3')
     .replace(/\b([A-ZÄÖÜ][a-zäöüß]+)\s+(\d{1,2})\b/g, function(g, raum, n){ return istRaum(raum) ? raum + '\u00a0' + n : g; });
 }
-const HINWEIS = /\b(monatlich|halbjährlich|vierteljährlich|jährlich|Prüftaste|auslösen|drücken)\b/i;
+const HINWEIS = /\b(monatlich|halbjährlich|vierteljährlich|jährlich|Prüftaste|auslösen|drücken|betätigen)\b/i;
 const LAGEWOERTER = ['wand', 'fenster', 'tür', 'tuer', 'decke', 'boden', 'links', 'rechts', 'mitte', 'oben', 'unten', 'eingang'];
 function istRaum(w){
   const l = (w || '').replace(/\u00a0(\d{1,2}|links|rechts|mitte|vorn|hinten)$/, '').toLowerCase();
@@ -4856,7 +4907,8 @@ function aufsSchema(r){
     /* v0.38: die Beschreibung hinter dem Gerät ist der Ort, wörtlich -
        "Fehlerstromschutzschalter für Steckdosen (15-20)" (Hofmann, 4-Raum-
        Wohnung); Jean: Beschreibungstexte am FI bleiben wörtlich */
-    const hinter = !sk && !fiImOrt && /^\s*(?:Fehlerstromschutzschalter|F[Il1]\s*[-‐‑–]?\s*Schutzschalter|FI|RC[DB])\s+(f(?:ü|u)r\s.+)$/i.exec(saeubern((r.bez && r.bez.roh) || bez));
+    /* "f.r": auch verlesen, "fir" (iPhone, 4-Raum-Wohnung) */
+    const hinter = !sk && !fiImOrt && /^\s*(?:Fehlerstromschutzschalter|F[Il1]\s*[-‐‑–]?\s*Schutzschalter|FI|RC[DB])\s+(f[a-zäöü]r\s.+)$/i.exec(saeubern((r.bez && r.bez.roh) || bez));
     if(hinter && (!r.ort || r.ort.leer)){
       const t = kreisStriche(hinter[1]).replace(/\s+/g, ' ').trim();
       if(r.ort){ setze(r.ort, t); r.ort.roh = t; } else r.ort = {text: t, herkunft: 'korrigiert', leer: false, unklar: false, roh: t};
@@ -5020,6 +5072,12 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
            weg (Jean) - "Prüftaste Fehlerstromschutzschalter monatlich
            drücken!!" unter 33-36 (Hofmann, 4-Raum-Wohnung) */
         if(HINWEIS.test(teile[i].zeilen[j].text)) return;
+        /* v0.40: eine Zeile, die mit einer Bezeichnung beginnt, ist ein eigener
+           Eintrag, keine Fortsetzung - auf dem iPhone fehlte der Hofmann-Liste
+           die Nummer 45, und "Relais Küche" hing an "Relais Wohnzimmer".
+           Fortsetzungen sind Orte ("Flur, Kammer", Schmidtgen & Mieth). */
+        const erstes = saeubern(teile[i].zeilen[j].text).split(/[\s,\/]+/)[0] || '';
+        if(erstes.length >= 3 && !istOrtsteil(erstes) && teilDeuten(erstes, BEZEICHNUNGEN)) return;
         if(best >= 0 && rz - bestK <= 2 && zz.zu[best] >= 0){
           (fortsetzung[i][best] = fortsetzung[i][best] || []).push(saeubern(teile[i].zeilen[j].text));
           benutzt[i][j] = true;
@@ -5072,6 +5130,12 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
          Jüngling-Blatt "Anlage errichtet im Juli 2016 durch ELEKTRO JÜNGLING
          GMBH" im Kasten unter Zeile 36, sonst als 37* gezählt */
       const leer = x => x.bez.leer && x.ort.leer && x.sich.leer;
+      /* v0.40: ein Hinweis ohne Nummer ist kein Eintrag (Wohnungsverteiler auf
+         dem iPhone: "Prüftaste ... monatlich betätigen" wurde Zeile 11*) */
+      if(!q && HINWEIS.test(rollenMitText.map(k => roh[k]).join(' '))){
+        fussBericht.push('Hinweis: ' + rollenMitText.map(k => saeubern(roh[k])).join(' ').slice(0, 60));
+        return;
+      }
       if(!q && reihen.length >= 3 && reihen.slice(-3).every(leer)){
         fussBericht.push(rollenMitText.map(k => saeubern(roh[k])).join(' ').slice(0, 60));
         return;
@@ -5348,26 +5412,48 @@ function baueTabelle(teile, nach, raster, rollen, gitter, basis, warnung){
    dieselben Kreise abdecken (Dewitz 2: 7 und 8 "Stromkreis 6"). Nur bei
    gleichem Ort und gleicher Absicherung. */
 const MEHRPOLIG = /^(Überspannungsableiter|E-Herd|Hauptschalter|FI-Schutzschalter|Fehlerstromschutzschalter)$/;
+/* v0.39 (Jean, 25.09.2026): Nummerierung in halben Teilungseinheiten -
+   Schmidtgen & Mieth: jeder Eintrag belegt zwei Nummern, beginnend bei einer
+   ungeraden (3-4, 5-6 ... 31-38), der E-Herd steht dreimal mit je zwei
+   Nummern. Dann ist 3-8 ein dreipoliger E-Herd über 3 TE. Erkannt, wenn
+   mindestens fünf Einträge mit Nummer da sind und vier von fünf eine gerade
+   Anzahl Nummern ab einer ungeraden belegen; zur Probe wird gemeldet, ob ein
+   E-Herd so auf 3 TE kommt. Auf allen anderen Blättern stehen Einzelnummern
+   (Münch 3, 4, 7, 8; Dewitz 5, 6, 9), dort bleibt es beim Bisherigen. */
+let letzteHalbeTE = null;
+function halbeTEPruefen(reihen){
+  const mit = reihen.filter(r => r.n && typeof r.n.a === 'number' && typeof r.n.b === 'number' && !r.abgeleitet);
+  const passend = mit.filter(r => r.n.a % 2 === 1 && (r.n.b - r.n.a) % 2 === 1);
+  const ja = mit.length >= 5 && passend.length >= 0.8*mit.length;
+  return {ja, text: (ja ? 'ja' : 'nein') + ' – ' + passend.length + ' von ' + mit.length +
+                    ' Einträgen belegen eine gerade Anzahl Nummern ab einer ungeraden'};
+}
 function geraeteZusammenfassen(reihen){
   const bericht = [];
   const txt = f => (f && !f.leer) ? (f.text || '') : '';
+  const halbe = halbeTEPruefen(reihen);
+  letzteHalbeTE = halbe;
   for(let i = 0; i < reihen.length; i++){
     const a = reihen[i];
     /* nur Einzelnummern: gemessene Klammern (Dewitz 2: E-Herd 3–4, 5–6, 7–8)
-       sind schon je ein Gerät und bleiben getrennt */
-    const einzeln = r => r.n && typeof r.n.b === 'number' && (r.n.a === null || r.n.a === undefined || r.n.a === r.n.b);
+       sind schon je ein Gerät und bleiben getrennt - außer bei halben TE */
+    const einzeln = r => r.n && typeof r.n.b === 'number' && (
+      r.n.a === null || r.n.a === undefined || r.n.a === r.n.b ||
+      (halbe.ja && r.n.a % 2 === 1 && (r.n.b - r.n.a) % 2 === 1));
     if(!einzeln(a) || !MEHRPOLIG.test(txt(a.bez))) continue;
     let j = i;
     while(j + 1 < reihen.length){
       const b = reihen[j + 1], vor = reihen[j];
       /* fortgezählte Nummern (Blatt 2, FI 45 und 46) tragen nur b */
-      if(!einzeln(b) || b.n.b !== vor.n.b + 1) break;
+      const anfang = (typeof b.n.a === 'number') ? b.n.a : b.n.b;
+      if(!einzeln(b) || anfang !== vor.n.b + 1) break;
       if(txt(b.bez) !== txt(a.bez) || txt(b.ort) !== txt(a.ort) || txt(b.sich) !== txt(a.sich)) break;
       j++;
     }
     if(j === i) continue;
-    const von = a.n.b, bis = reihen[j].n.b;
-    bericht.push(von + '–' + bis + ' ' + txt(a.bez));
+    const von = (typeof a.n.a === 'number') ? a.n.a : a.n.b, bis = reihen[j].n.b;
+    const te = halbe.ja ? (bis - von + 1)/2 : null;
+    bericht.push(von + '–' + bis + ' ' + txt(a.bez) + (te ? ' (' + te + ' TE' + (/^E-Herd$/.test(txt(a.bez)) ? (te === 3 ? ', passt zum dreipoligen Herd' : ', passt NICHT zum dreipoligen Herd') : '') + ')' : ''));
     a.n.text = von + '–' + bis; a.n.a = von; a.n.b = bis; a.hinweis = '';
     reihen.splice(i + 1, j - i);
   }
