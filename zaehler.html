@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<!--
+  Zähler-Test · Zählerstand per Kamera lesen
+
+  v0.1 · 05.10.2026: Erste Probe (Wunsch von Jean, aus der Arbeit mit SAM):
+  Kann die Erkennung, die SAM für die Verteilerbeschreibungen nutzt, auch
+  Zählerstände lesen – mechanische Rollenzählwerke (Wasser, Gas) und digitale
+  Anzeigen (Strom, Wärme)? Die Seite ist bewusst schlicht: Fotos wählen oder
+  aufnehmen, jedes wird gelesen, der Bericht lässt sich kopieren. Gedeutet wird
+  noch wenig – erst die Fotos zeigen, woran es hakt:
+    1. das ganze Foto lesen,
+    2. Wörter mit vielen Ziffern zu Ziffernreihen zusammenfassen (Rollen
+       werden oft Ziffer für Ziffer gelesen),
+    3. die höchste Ziffernreihe ist der Kandidat für den Stand (die Ziffern
+       des Zählwerks sind fast immer die größten auf dem Zähler),
+    4. ihn ausschneiden, vergrößern und noch einmal lesen,
+    5. eine Reihe direkt rechts daneben gilt als Nachkommastellen,
+    6. die Zählernummer suchen (kleiner, oft mit Strich oder Buchstaben).
+  Jede Stufe meldet sich im Bericht, auch wenn sie nichts tut.
+
+  Technik wie paddle-test.html: ppu-paddle-ocr (MIT) über ONNX Runtime Web,
+  Modell v6 tiny. In der App soll das später ohne Netz laufen – das ist hier
+  noch nicht eingebaut.
+  Musterlösung im Prüfstand (werkzeuge/zaehler-pruefen.mjs):
+  proben/zaehler/<Foto>.soll.txt, siehe proben/zaehler/LIESMICH.md.
+-->
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Zähler-Test · Zählerstand lesen</title>
+<script type="importmap">
+{
+  "imports": {
+    "onnxruntime-web": "https://esm.sh/onnxruntime-web@1.23.0"
+  }
+}
+</script>
+<style>
+  :root{
+    --gruen:#A0D241; --gruen-tief:#7CA82C; --dunkel:#1A1F16; --grund:#FBFBF7;
+    --karte:#FFFFFF; --linie:#E2E4DC; --grau:#6B7065; --rot:#C0392B; --bernstein:#D98E0B;
+    box-sizing:border-box;
+    padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+  }
+  *,*::before,*::after{box-sizing:inherit}
+  body{margin:0;font-family:-apple-system,system-ui,sans-serif;font-size:17px;line-height:1.45;
+       color:var(--dunkel);background:var(--grund);-webkit-text-size-adjust:100%}
+  .huelle{max-width:900px;margin:0 auto;padding:18px 16px 60px}
+  header{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:18px}
+  header h1{font-size:21px;margin:0;font-weight:640;letter-spacing:-.01em}
+  header .ver{font-size:13px;color:var(--grau)}
+  .karte{background:var(--karte);border:1px solid var(--linie);border-radius:16px;padding:16px;margin-bottom:14px}
+  .karte h2{font-size:15px;margin:0 0 12px;font-weight:620;color:var(--grau)}
+  button,.knopf{font:inherit;min-height:48px;padding:0 18px;border-radius:14px;
+    border:1px solid var(--gruen-tief);background:var(--gruen);color:var(--dunkel);
+    font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:8px;cursor:pointer}
+  button.still,.knopf.still{background:#fff;border-color:var(--linie);font-weight:500}
+  button:disabled{opacity:.45;cursor:default}
+  .knopfreihe{display:flex;gap:10px;flex-wrap:wrap}
+  input[type=file]{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+  .status{font-size:14px;color:var(--grau);margin:10px 0 0}
+  .status.fehler{color:var(--rot)}
+  .ergebnis{border-top:1px solid var(--linie);padding-top:14px;margin-top:14px}
+  .ergebnis:first-child{border-top:0;padding-top:0;margin-top:0}
+  .ergebnis h3{font-size:15px;margin:0 0 8px;font-weight:620}
+  .stand{font-size:30px;font-weight:680;letter-spacing:.04em;font-family:ui-monospace,Menlo,monospace}
+  .stand small{font-size:18px;color:var(--rot)}
+  .neben{font-size:14px;color:var(--grau);margin:2px 0 10px}
+  canvas{width:100%;height:auto;border-radius:12px;display:block;background:#EFEFEA;margin:8px 0}
+  canvas.ausschnitt{max-width:420px}
+  pre{white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,Menlo,monospace;
+      font-size:13px;line-height:1.5;background:#F6F7F3;border:1px solid var(--linie);
+      border-radius:12px;padding:12px;margin:0}
+  details summary{cursor:pointer;font-size:14px;color:var(--grau);margin:6px 0}
+</style>
+</head>
+<body>
+<div class="huelle">
+  <header>
+    <h1>Zähler-Test · Zählerstand lesen</h1>
+    <span class="ver">v0.1 · 05.10.2026</span>
+  </header>
+
+  <div class="karte">
+    <h2>Fotos</h2>
+    <div class="knopfreihe">
+      <label class="knopf" for="wahl">Fotos wählen</label>
+      <input type="file" id="wahl" accept="image/*" multiple>
+      <label class="knopf still" for="kamera">Foto aufnehmen</label>
+      <input type="file" id="kamera" accept="image/*" capture="environment">
+      <button class="still" id="kopieren" disabled>Ergebnisse kopieren</button>
+    </div>
+    <p class="status" id="status">Die Erkennung wird beim ersten Foto geladen.</p>
+  </div>
+
+  <div class="karte" id="ergebnisse" hidden></div>
+
+  <div class="karte">
+    <h2>Umgebung</h2>
+    <pre id="umgebung">…</pre>
+  </div>
+</div>
+
+<script type="module">
+const VERSION = 'v0.1 · 05.10.2026';
+
+/* ==================== Bibliothek (wie paddle-test.html) ==================== */
+const WEGE = [
+  {name:'esm.sh, getrennte Laufzeit', url:'https://esm.sh/ppu-paddle-ocr/web?external=onnxruntime-web'},
+  {name:'esm.sh, alles in einem',     url:'https://esm.sh/ppu-paddle-ocr/web'},
+  {name:'jsDelivr',                   url:'https://cdn.jsdelivr.net/npm/ppu-paddle-ocr/+esm'}
+];
+let Sdk = null, dienst = null, weg = '';
+async function starte(){
+  if(dienst) return {weg};
+  const fehler = [];
+  for(const w of WEGE){
+    try{
+      const m = await import(/* @vite-ignore */ w.url);
+      Sdk = m.PaddleOcrService || (m.default && m.default.PaddleOcrService);
+      if(!Sdk) throw new Error('PaddleOcrService nicht gefunden');
+      weg = w.name; break;
+    }catch(e){ fehler.push(w.name + ': ' + (e && e.message ? e.message : e)); }
+  }
+  if(!Sdk) throw new Error('Kein Weg hat geklappt. ' + fehler.join(' | '));
+  dienst = new Sdk({ recognition:{ mainThreadYieldMs: 24 }, debugging:{ verbose:false } });
+  await dienst.initialize();
+  return {weg};
+}
+
+let umgebungText = '';
+(async function(){
+  const z = ['Fassung: ' + VERSION, 'Bildschirm: ' + innerWidth + ' × ' + innerHeight];
+  let gpu = 'nein';
+  try{ if(navigator.gpu){ const a = await navigator.gpu.requestAdapter(); gpu = a ? 'ja' : 'kein Adapter'; } }
+  catch(e){ gpu = 'Fehler: ' + e.message; }
+  z.push('WebGPU: ' + gpu, 'Kennung: ' + navigator.userAgent);
+  umgebungText = z.join('\n');
+  document.getElementById('umgebung').textContent = umgebungText;
+})();
+
+/* ==================== Bild ==================== */
+/* Höchstens 2400 Punkte lang: die Erkennung verkleinert ohnehin, das
+   Ausschneiden in Stufe 4 braucht aber Reserven. */
+const LANG = 2400;
+async function bildLaden(quelle){
+  const blob = quelle instanceof Blob ? quelle : await (await fetch(quelle)).blob();
+  let bmp;
+  try{ bmp = await createImageBitmap(blob, {imageOrientation:'from-image'}); }
+  catch(e){ bmp = await createImageBitmap(blob); }
+  const f = Math.min(1, LANG / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(bmp.width * f); c.height = Math.round(bmp.height * f);
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  return c;
+}
+function ausschneiden(c, x, y, b, h, faktor){
+  const x0 = Math.max(0, Math.floor(x)), y0 = Math.max(0, Math.floor(y));
+  const x1 = Math.min(c.width, Math.ceil(x + b)), y1 = Math.min(c.height, Math.ceil(y + h));
+  const z = document.createElement('canvas');
+  z.width = Math.max(1, Math.round((x1 - x0) * faktor)); z.height = Math.max(1, Math.round((y1 - y0) * faktor));
+  const g = z.getContext('2d');
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(c, x0, y0, x1 - x0, y1 - y0, 0, 0, z.width, z.height);
+  return {canvas:z, x0, y0, faktor};
+}
+
+/* ==================== Wörter ==================== */
+function woerterAus(erg, versatz){
+  const raus = [], v = versatz || {x0:0, y0:0, faktor:1};
+  (Array.isArray(erg.lines) ? erg.lines : []).forEach((zeile, zi) => {
+    const ws = Array.isArray(zeile) ? zeile : (zeile && zeile.words) ? zeile.words : [zeile];
+    ws.forEach(w => {
+      if(!w) return;
+      const b = w.box || w.bbox || w.rect; if(!b) return;
+      const text = String(w.text || '').replace(/[^ -ɏ€]/g, '').trim();
+      if(!/[0-9A-Za-z]/.test(text)) return;
+      const x = (b.x !== undefined ? b.x : b.x0), y = (b.y !== undefined ? b.y : b.y0);
+      const br = (b.width !== undefined ? b.width : b.x1 - b.x0), ho = (b.height !== undefined ? b.height : b.y1 - b.y0);
+      raus.push({text, sich:+w.confidence || 0, zeile:zi,
+        x:v.x0 + x / v.faktor, y:v.y0 + y / v.faktor, b:br / v.faktor, h:ho / v.faktor});
+    });
+  });
+  return raus;
+}
+/* Buchstaben, die in einem Ziffernfeld für Ziffern stehen: O/o/D/Q → 0,
+   I/l/|/! → 1, Z → 2, S → 5, G → 6, B → 8. Nur in Wörtern, die schon
+   überwiegend aus Ziffern bestehen – „Wasser“ bleibt „Wasser“. */
+const ALS_ZIFFER = {O:'0', o:'0', D:'0', Q:'0', I:'1', l:'1', '|':'1', '!':'1', Z:'2', z:'2', S:'5', s:'5', G:'6', B:'8'};
+function ziffernText(t){
+  const ziffern = (t.match(/\d/g) || []).length, verdaechtig = [...t].filter(ch => ALS_ZIFFER[ch]).length;
+  if(ziffern >= 2 && ziffern + verdaechtig >= t.replace(/[\s.,'-]/g, '').length * 0.7)
+    return [...t].map(ch => ALS_ZIFFER[ch] || ch).join('');
+  return t;
+}
+const nurZiffern = t => (t.match(/\d/g) || []).join('');
+
+/* Stufe 2: Wörter derselben Zeile mit ähnlicher Höhe und kleiner Lücke werden
+   eine Reihe – Rollenzählwerke kommen oft Ziffer für Ziffer. */
+function reihenBilden(ws){
+  const kand = ws.map(w => Object.assign({}, w, {zt:ziffernText(w.text), orig:w}))
+    .filter(w => nurZiffern(w.zt).length >= 1 && nurZiffern(w.zt).length >= w.zt.replace(/[\s.,'-]/g, '').length * 0.6)
+    .sort((a, b) => a.x - b.x);
+  const reihen = [];
+  kand.forEach(w => {
+    const r = reihen.find(r => {
+      const l = r.teile[r.teile.length - 1];
+      const mitte = Math.abs((l.y + l.h / 2) - (w.y + w.h / 2)) < Math.max(l.h, w.h) * 0.5;
+      const hoehe = w.h / l.h > 0.7 && w.h / l.h < 1.43;
+      const luecke = w.x - (l.x + l.b) < Math.max(l.h, w.h) * 1.2 && w.x - (l.x + l.b) > -l.h * 0.5;
+      return mitte && hoehe && luecke;
+    });
+    if(r) r.teile.push(w); else reihen.push({teile:[w]});
+  });
+  return reihen.map(r => {
+    const x = Math.min(...r.teile.map(t => t.x)), y = Math.min(...r.teile.map(t => t.y));
+    const x1 = Math.max(...r.teile.map(t => t.x + t.b)), y1 = Math.max(...r.teile.map(t => t.y + t.h));
+    const h = r.teile.reduce((s, t) => s + t.h, 0) / r.teile.length;
+    return {teile:r.teile, x, y, b:x1 - x, h, hGanz:y1 - y,
+      text:r.teile.map(t => t.zt).join(' '), ziffern:nurZiffern(r.teile.map(t => t.zt).join('')),
+      sich:Math.min(...r.teile.map(t => t.sich))};
+  });
+}
+
+/* Rot hinterlegte Rollen: Anteil der Breite, ab dem die Spalten rot sind. */
+function rotAb(c, k){
+  const x0 = Math.max(0, Math.floor(k.x)), y0 = Math.max(0, Math.floor(k.y + k.hGanz * 0.1));
+  const b = Math.min(c.width - x0, Math.ceil(k.b)), h = Math.max(1, Math.min(c.height - y0, Math.ceil(k.hGanz * 0.8)));
+  if(b < 10) return {anteil:0, bericht:'Kasten zu schmal'};
+  const px = c.getContext('2d').getImageData(x0, y0, b, h).data;
+  const spalte = new Array(b).fill(0);
+  for(let y = 0; y < h; y++) for(let x = 0; x < b; x++){
+    const i = (y * b + x) * 4, rr = px[i], gg = px[i + 1], bb = px[i + 2];
+    if(rr > 90 && rr > gg * 1.6 && rr > bb * 1.6) spalte[x]++;
+  }
+  const istRot = spalte.map(n => n / h > 0.25);
+  /* von rechts: zusammenhängend rot (kleine Lücken zwischen den Rollen erlaubt) */
+  let ende = b - 1; while(ende > 0 && !istRot[ende] && b - ende < b * 0.08) ende--;
+  if(!istRot[ende]) return {anteil:0, bericht:'kein Rot am Ende'};
+  let ab = ende, luecke = 0;
+  for(let x = ende; x >= 0; x--){
+    if(istRot[x]){ ab = x; luecke = 0; } else if(++luecke > k.h * 0.35) break;
+  }
+  const anteil = ab / b, rotBreite = (ende - ab) / b;
+  if(rotBreite < 0.08) return {anteil:0, bericht:'zu wenig Rot'};
+  return {anteil, bericht:`ab ${Math.round(anteil * 100)} % der Breite`};
+}
+
+/* ==================== Lesen ==================== */
+async function lese(quelle, name, soll){
+  const t0 = performance.now(), mess = [];
+  await starte();
+  const c = await bildLaden(quelle);
+  mess.push(`Bild ${c.width} × ${c.height}`);
+  /* Stufe 1 */
+  const erg = await dienst.recognize(c, {noCache:true});
+  const ws = woerterAus(erg);
+  mess.push(`Stufe 1 – ganzes Foto: ${ws.length} Wörter`);
+  /* Stufe 2 */
+  const reihen = reihenBilden(ws);
+  mess.push(`Stufe 2 – Ziffernreihen: ${reihen.length}` + (reihen.length ? ' (' + reihen.map(r => r.ziffern + '/' + Math.round(r.h)).join(', ') + ')' : ''));
+  /* Stufe 3: höchste Reihe mit 3 bis 10 Ziffern; bei fast gleicher Höhe die
+     sicherere. Eine Reihe, die wie die Zählernummer aussieht (mit Strich oder
+     Buchstaben im Rohtext), zählt halb. */
+  const kand = reihen.filter(r => r.ziffern.length >= 3 && r.ziffern.length <= 10)
+    .map(r => Object.assign(r, {punkte:r.h * (0.5 + r.sich / 2) * (/[A-Za-z-]/.test(r.teile.map(t => t.text).join('')) ? 0.5 : 1)}))
+    .sort((a, b) => b.punkte - a.punkte);
+  const stand = kand[0] || null;
+  mess.push('Stufe 3 – Kandidat: ' + (stand ? `${stand.ziffern} (Höhe ${Math.round(stand.h)}, Sicherheit ${stand.sich.toFixed(2)})` : 'keiner'));
+  /* Stufe 4: ausschneiden, auf etwa 90 Punkte Ziffernhöhe bringen, neu lesen */
+  let nachlese = null, ausschnitt = null;
+  if(stand){
+    const rand = stand.h * 0.6, faktor = Math.max(1, Math.min(4, 90 / stand.h));
+    ausschnitt = ausschneiden(c, stand.x - rand * 1.5, stand.y - rand, stand.b + rand * 3, stand.hGanz + rand * 2, faktor);
+    try{
+      const e2 = await dienst.recognize(ausschnitt.canvas, {noCache:true});
+      const r2 = reihenBilden(woerterAus(e2, ausschnitt)).filter(r => r.ziffern.length >= 3)
+        .sort((a, b) => b.h - a.h)[0];
+      if(r2){
+        const genommen = r2.ziffern.length >= stand.ziffern.length - 1 && r2.ziffern.length <= stand.ziffern.length + 2
+          && (r2.sich >= stand.sich || r2.ziffern.length > stand.ziffern.length);
+        nachlese = {ziffern:r2.ziffern, roh:r2.text, sich:r2.sich, genommen};
+        mess.push(`Stufe 4 – vergrößert (×${faktor.toFixed(1)}) gelesen: ${r2.ziffern} (Sicherheit ${r2.sich.toFixed(2)}) – ${genommen ? 'genommen' : 'nicht genommen'}`);
+      }else mess.push(`Stufe 4 – vergrößert (×${faktor.toFixed(1)}) gelesen: keine Ziffernreihe`);
+    }catch(e){ mess.push('Stufe 4 – Fehler: ' + e.message); }
+  }else mess.push('Stufe 4 – entfällt (kein Kandidat)');
+  let standZiffern = nachlese && nachlese.genommen ? nachlese.ziffern : stand ? stand.ziffern : '';
+  /* Stufe 5a: Komma oder Punkt in der Reihe selbst („012345.6“ auf einer
+     Digitalanzeige) trennt Vor- und Nachkomma. */
+  let nachInReihe = '', wie = '';
+  const rohReihe = nachlese && nachlese.genommen ? nachlese.roh : stand ? stand.text : '';
+  const trenn = String(rohReihe || '').replace(/\s+/g, '').match(/^(.*\d)[.,](\d{1,4})$/);
+  if(trenn && nurZiffern(trenn[1]).length >= 3){
+    standZiffern = nurZiffern(trenn[1]); nachInReihe = trenn[2]; wie = 'Komma/Punkt in der Reihe';
+  }
+  /* Stufe 5b: rot hinterlegte Rollen am Ende der Reihe sind die Nachkomma-
+     stellen. Gemessen wird je Spalte des Kastens der Anteil roter Punkte; ab
+     der Stelle, von der an es bis zum Ende rot bleibt, wird nach dem Anteil
+     der Breite geteilt (Rollen sind gleich breit). */
+  let rotBericht = 'nicht gemessen';
+  if(!nachInReihe && stand && standZiffern.length >= 4){
+    const rot = rotAb(c, stand);
+    rotBericht = rot.bericht;
+    if(rot.anteil > 0 && rot.anteil < 1){
+      const k = Math.round(standZiffern.length * rot.anteil);
+      if(k >= 3 && k < standZiffern.length && standZiffern.length - k <= 4){
+        nachInReihe = standZiffern.slice(k); standZiffern = standZiffern.slice(0, k); wie = 'rote Rollen';
+      }
+    }
+  }
+  mess.push('Stufe 5a/b – Trennung in der Reihe: ' + (nachInReihe ? `${standZiffern},${nachInReihe} (${wie})` : 'keine') + ' · Rot: ' + rotBericht);
+  /* Stufe 5: Reihe direkt rechts, ähnliche oder etwas kleinere Höhe, 1–4 Ziffern */
+  let nach = nachInReihe ? {ziffern:nachInReihe} : null;
+  if(stand && !nach){
+    nach = reihen.filter(r => r !== stand && r.ziffern.length >= 1 && r.ziffern.length <= 4
+      && r.x >= stand.x + stand.b - stand.h * 0.3 && r.x - (stand.x + stand.b) < stand.h * 2.5
+      && Math.abs((r.y + r.h / 2) - (stand.y + stand.h / 2)) < stand.h * 0.6 && r.h > stand.h * 0.55 && r.h < stand.h * 1.5)
+      .sort((a, b) => a.x - b.x)[0] || null;
+  }
+  mess.push('Stufe 5c – Nachkommastellen: ' + (nach ? nach.ziffern + (nachInReihe ? ' (aus der Reihe)' : ' (Reihe rechts daneben)') : 'keine'));
+  /* Stufe 6: Zählernummer – Wörter mit mindestens 5 Ziffern, nicht der Stand;
+     mit Musterlösung: die, die ihr am nächsten kommt. */
+  const sollNr = soll && soll.nummer ? nurZiffern(soll.nummer) : '';
+  /* Ohne Musterlösung gehen Wörter mit „Nr“, Strich oder Buchstaben vor –
+     so sehen Zählernummern meist aus –, dann die längeren. */
+  const standWoerter = stand ? stand.teile.map(t => t.orig) : [];
+  const nrKand = ws.filter(w => !standWoerter.includes(w))
+    .map(w => ({w, z:nurZiffern(ziffernText(w.text))})).filter(x => x.z.length >= 5);
+  let nummer = null;
+  if(sollNr) nummer = nrKand.find(x => x.z.includes(sollNr) || sollNr.includes(x.z) && x.z.length >= sollNr.length - 1) || null;
+  const wieNummer = x => /nr|[a-z]|-/i.test(x.w.text) ? 1 : 0;
+  if(!nummer) nummer = nrKand.sort((a, b) => wieNummer(b) - wieNummer(a) || b.z.length - a.z.length)[0] || null;
+  mess.push('Stufe 6 – Zählernummer: ' + (nummer ? `${nummer.w.text}` + (sollNr ? (nummer.z.includes(sollNr) ? ' (passt zur Musterlösung)' : ' (passt nicht)') : '') : 'keine gefunden'));
+  const ms = Math.round(performance.now() - t0);
+  mess.push(`Zeit: ${ms} ms`);
+  /* Abgleich mit der Musterlösung */
+  let abgleich = '';
+  if(soll && soll.stand){
+    const [sv, sn] = String(soll.stand).split(/[,.]/);
+    const ohneNull = t => t.replace(/^0+(?=\d)/, '');
+    const vorRichtig = ohneNull(nurZiffern(sv)) === ohneNull(standZiffern);
+    const nachRichtig = !sn ? null : !!nach && nurZiffern(sn) === nach.ziffern;
+    abgleich = `Vorkomma ${vorRichtig ? 'richtig' : 'falsch'} (soll ${sv}, gelesen ${standZiffern || '–'})`
+      + (sn ? ` · Nachkomma ${nachRichtig ? 'richtig' : 'falsch'} (soll ${sn}, gelesen ${nach ? nach.ziffern : '–'})` : '')
+      + (sollNr ? ` · Nummer ${nummer && nummer.z.includes(sollNr) ? 'gefunden' : 'nicht gefunden'}` : '');
+  }
+  const roh = ws.map(w => `${w.text}  [${w.sich.toFixed(2)}, Höhe ${Math.round(w.h)}]`).join('\n');
+  const text = [`===== ${name} =====`,
+    `Stand: ${standZiffern || '–'}${nach ? ',' + nach.ziffern : ''}`,
+    abgleich ? 'Abgleich: ' + abgleich : '',
+    '--- Messwerte ---', ...mess, '--- Rohtext ---', roh].filter(Boolean).join('\n');
+  return {name, text, stand:standZiffern, nach:nach ? nach.ziffern : '', nummer:nummer ? nummer.w.text : '',
+    abgleich, ms, bild:c, standBox:stand, nachBox:nach, nrBox:nummer ? nummer.w : null, ausschnitt, woerter:ws};
+}
+
+/* ==================== Anzeige ==================== */
+function zeichnen(r){
+  const c = document.createElement('canvas');
+  c.width = r.bild.width; c.height = r.bild.height;
+  const g = c.getContext('2d');
+  g.drawImage(r.bild, 0, 0);
+  g.lineWidth = Math.max(2, c.width / 400);
+  r.woerter.forEach(w => { g.strokeStyle = 'rgba(120,120,120,.6)'; g.strokeRect(w.x, w.y, w.b, w.h); });
+  [[r.nrBox, '#1E6FD9'], [r.nachBox, '#C0392B'], [r.standBox, '#7CA82C']].forEach(([b, f]) => {
+    if(!b) return; g.strokeStyle = f; g.lineWidth = Math.max(4, c.width / 200); g.strokeRect(b.x, b.y, b.b, b.hGanz || b.h);
+  });
+  return c;
+}
+const ergebnisse = [];
+function zeigen(r){
+  const box = document.getElementById('ergebnisse');
+  box.hidden = false;
+  const d = document.createElement('div');
+  d.className = 'ergebnis';
+  d.innerHTML = `<h3></h3><div class="stand"></div><div class="neben"></div><details><summary>Bericht</summary><pre></pre></details>`;
+  d.querySelector('h3').textContent = r.name;
+  d.querySelector('.stand').innerHTML = r.stand ? `${r.stand}${r.nach ? '<small>,' + r.nach + '</small>' : ''}` : '–';
+  d.querySelector('.neben').textContent = [r.nummer ? 'Zählernummer ' + r.nummer : 'keine Zählernummer erkannt', r.abgleich, (r.ms / 1000).toFixed(1) + ' s'].filter(Boolean).join(' · ');
+  d.querySelector('pre').textContent = r.text;
+  d.insertBefore(zeichnen(r), d.querySelector('details'));
+  if(r.ausschnitt){ const a = r.ausschnitt.canvas; a.className = 'ausschnitt'; d.insertBefore(a, d.querySelector('details')); }
+  box.appendChild(d);
+}
+async function dateien(liste){
+  const st = document.getElementById('status');
+  for(const f of liste){
+    st.className = 'status'; st.textContent = `Lese ${f.name} …`;
+    try{
+      const r = await lese(f, f.name, null);
+      ergebnisse.push(r); zeigen(r);
+      document.getElementById('kopieren').disabled = false;
+      st.textContent = `${ergebnisse.length} gelesen.`;
+    }catch(e){ st.className = 'status fehler'; st.textContent = 'Fehler: ' + (e && e.message ? e.message : e); }
+  }
+}
+document.getElementById('wahl').onchange = e => { dateien([...e.target.files]); e.target.value = ''; };
+document.getElementById('kamera').onchange = e => { dateien([...e.target.files]); e.target.value = ''; };
+document.getElementById('kopieren').onclick = async () => {
+  const text = [umgebungText, ...ergebnisse.map(r => r.text)].join('\n\n');
+  try{ await navigator.clipboard.writeText(text); document.getElementById('status').textContent = 'Kopiert.'; }
+  catch(e){ document.getElementById('status').textContent = 'Kopieren nicht möglich.'; }
+};
+
+/* Für den Prüfstand (werkzeuge/zaehler-pruefen.mjs). */
+window.__zaehler = {
+  starte,
+  lese: async (url, name, soll) => { const r = await lese(url, name, soll); return {text:r.text, stand:r.stand, nach:r.nach, nummer:r.nummer, abgleich:r.abgleich, ms:r.ms}; },
+  version: VERSION
+};
+</script>
+</body>
+</html>
