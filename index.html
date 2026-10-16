@@ -1,7 +1,14 @@
 <!DOCTYPE html>
 <!--
   PaddleOCR-Test · Verteilerbeschreibung
-  v0.56 · 15.10.2026
+  v0.58 · 15.10.2026
+
+  v0.58: Fehlerbehebung an v0.55 – Relais, Stromstoßschalter, Trafo,
+  Hauptschalter, Überspannungsableiter und Steuersicherung lösen „Absicherung
+  fehlt“ nicht mehr aus (iPhone, IMG_5146: Relais 1–6 bernstein, obwohl das
+  Blatt für sie keine Absicherung führt). Die Mehrfachlesung bleibt wie in
+  v0.56. v0.57 (schneller nachlesen) wurde erprobt und verworfen: mehr stille
+  Fehler (1,7 → 1,8 je 100) für wenig Zeit – Jean: Weg 1, Sicherheit vor Zeit.
 
   v0.56: Mehrfachlesung (Umbau Etappe 3, Jean 15.10.2026). Trägt die erste
   Lesung Bernstein oder fast keine Zeilen, liest SAM dasselbe Foto noch zweimal
@@ -922,7 +929,7 @@ pre.abgleich.gut{background:#EAF5DC;border-color:#8FBE36}
 
   <header>
     <h1>PaddleOCR-Test · Verteilerbeschreibung</h1>
-    <span class="ver">v0.56 · 15.10.2026</span>
+    <span class="ver">v0.58 · 15.10.2026</span>
   </header>
 
   <div class="karte">
@@ -1110,7 +1117,7 @@ const MODELLE = {
   latin: {name:'v5 lateinisch',  konstante:'V5_LATIN_MOBILE_MODEL'}
 };
 
-const VERSION = 'v0.56 · 15.10.2026';
+const VERSION = 'v0.58 · 15.10.2026';
 
 /* ==================== Schrittliste ==================== */
 
@@ -3045,8 +3052,8 @@ const mehrfachText = r => mehrfachInhalt(r) !== '||';
 const mehrfachZweifel = r => !!r.zweifel && Object.keys(r.zweifel).some(k => r.zweifel[k]);
 
 /* Abwandlungen aus dem Original (nicht aus dem verkleinerten Arbeitsbild) */
-function mehrfachAbwandlung(art){
-  const o = quelleOriginal;
+function mehrfachAbwandlung(art, basis){
+  const o = basis || quelleOriginal;
   const c = document.createElement('canvas');
   if(art === 'klein'){
     c.width = Math.round(o.width * MEHRFACH_KLEIN); c.height = Math.round(o.height * MEHRFACH_KLEIN);
@@ -3153,6 +3160,18 @@ async function mehrfachLesen(melde){
   if(lw && lw.width){ lwKopie.width = lw.width; lwKopie.height = lw.height; lwKopie.getContext('2d').drawImage(lw, 0, 0); }
   const soll = aktuellesSoll;
   const lesungen = [erste], zeiten = [];
+  /* v0.57 erprobt und verworfen (Jean, 15.10.2026: Weg 1 – keine stillen
+     Fehler für Zeit): (1) die Zusatzlesungen vom Ausschnitt der ersten
+     ausgehen lassen – IMG_6014 las daraus verklebte Nummern („4tec“), 6 Zeilen
+     fielen weg; (2) die dritte Lesung nur, wenn die zweite der ersten
+     widerspricht – lesen beide denselben Fehler (fehlende Absicherung bei
+     IMG_6552/IMG_7120, verrutschter Ort bei IMG_6539), bleibt er ohne
+     Bernstein; im vollen Lauf 17 neue stille Fehler gegen 9 weggefallene.
+     v0.58: ohne eigene Grundlage – wie in v0.56 geht die dritte Lesung vom
+     schon verkleinerten Bild der zweiten aus (quelleOriginal ist dann deren
+     Abwandlung). Ein erster Lauf mit dem unverkleinerten Original als
+     Grundlage brachte dieselben 17 neuen stillen Fehler wie v0.57 – vermutlich
+     lag es auch dort eher daran als an Punkt (2). */
   for(const art of ['klein', 'dreh']){
     if(melde) melde(art === 'klein' ? 'Zweite Lesung' : 'Dritte Lesung');
     const tL = jetzt();
@@ -3171,8 +3190,8 @@ async function mehrfachLesen(melde){
 
   const {reihen, bericht} = mehrfachAbstimmen(lesungen);
   letzteReihen = reihen;
-  const zeile = 'Mehrfachlesung: 3 Lesungen (Anlass: ' + (zw ? zw + ' Zeilen mit Bernstein' : 'nur ' + mitText.length + ' Zeilen') +
-    '; weitere Lesungen 15 % kleiner ' + zeiten[0] + ', um 1° gedreht ' + zeiten[1] + '), ' +
+  const zeile = 'Mehrfachlesung: ' + lesungen.length + ' Lesungen (Anlass: ' + (zw ? zw + ' Zeilen mit Bernstein' : 'nur ' + mitText.length + ' Zeilen') +
+    '; 15 % kleiner ' + zeiten[0] + ', um 1° gedreht ' + zeiten[1] + '), ' +
     bericht.einig + ' Nummern einig' +
     (bericht.uneinig.length ? ', ohne Mehrheit (bernstein): ' + bericht.uneinig.join(', ') : '') +
     (bericht.weg.length ? ', nur in einer Lesung (weggelassen): ' + bericht.weg.join(', ') : '') +
@@ -6417,7 +6436,10 @@ function zweifelBestimmen(reihen, sichSpalte, zw){
     if(leerB && leerO){ z.bez = true; grund('Zeile ohne Text'); }
     if(!leerB && fremdesWort(r.bez.text)){ z.bez = true; grund('fremdes Wort'); }
     if(!leerO && fremdesWort(r.ort.text)){ z.ort = true; grund('fremdes Wort'); }
-    if(sichErwartet && (!r.sich || r.sich.leer)){ z.sich = true; grund('Absicherung fehlt'); }
+    /* v0.58: Geräte ohne eigene Absicherung auf dem Blatt lösen das nicht aus –
+       auf dem iPhone waren bei IMG_5146 Relais 1–6 und „Trafo Beleuchtung“ bernstein */
+    const ohneSich = /Relais|Stromsto|Trafo|Hauptschalter|Überspannung|Steuer/i.test(leerB ? '' : r.bez.text);
+    if(sichErwartet && !ohneSich && (!r.sich || r.sich.leer)){ z.sich = true; grund('Absicherung fehlt'); }
     return z;
   });
   liste.gruende = gruende;
